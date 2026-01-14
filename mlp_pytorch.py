@@ -1,28 +1,5 @@
 import torch
 from torch import nn
-
-class ReflectivityDataset(torch.utils.data.Dataset):
-
-	def __init__(self, X, y, image=False):
-		if not torch.is_tensor(X) and not torch.is_tensor(y):
-			X = torch.from_numpy(X)
-			y = torch.from_numpy(y)
-
-		# # squeeze
-		# X = X.squeeze()
-		# y = y.squeeze()
-
-		if image:
-			y = y.view(-1,9,9)
-
-		self.X = X
-		self.y = y
-
-	def __len__(self):
-		return len(self.X)
-
-	def __getitem__(self, i):
-		return self.X[i], self.y[i]
 	
 
 class ForwardMLP(nn.Module):

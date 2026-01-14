@@ -1,80 +1,82 @@
 import torch
-from torch import nn
 import os
 import numpy as np
+from tqdm import tqdm
+from shutil import copy2
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split 
+from dotenv import load_dotenv
+load_dotenv("params.env")
 
-from dataloader import load_reflection_spectra_data
-from mlp_pytorch import ForwardMLP, ReflectivityDataset
+from dataloader import load_reflection_spectra_dataloaders
+from mlp_pytorch import ForwardMLP
+from loss import ResonancePeaksLoss
+from training_utils import validate_model, evaluate_peak_shift
+
+DATASET_PATH = os.getenv("DATASET_PATH")
 
 
-DATASET_PATH = "__data/pisa_data_2025_12_02.h5"
-
-def validate_model(model, val_loader, criterion):
-    model.eval()
-    running_val_loss = 0.0
-    
-    with torch.no_grad(): # No gradient needed for validation
-        for inputs, targets in val_loader:
-            inputs = inputs.view(inputs.size(0), -1)
-            targets = targets.view(targets.size(0), -1)
-            
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            running_val_loss += loss.item()
-            
-    avg_val_loss = running_val_loss / len(val_loader)
-    return avg_val_loss
 
 if __name__ == '__main__':
 
-    lr = 0.001
-    epochs = 20
-    batch_size = 32
+    layers = [1024,512,256,128]
+    lr = float(os.getenv("LR"))
+    epochs = int(os.getenv("EPOCHS"))
+    batch_size = int(os.getenv("BATCH_SIZE"))
+    patience = int(os.getenv("PATIENCE"))
+    print("lr:", lr, "epochs:", epochs, "batch size:", batch_size, "patience:", patience)
     
     torch.manual_seed(42)
     np.random.seed(42)
 
-    x_full_train, x_test, y_full_train, y_test, wavelength = load_reflection_spectra_data(DATASET_PATH, test_fraction=0.05)
-    
-    x_train, x_val, y_train, y_val = train_test_split(
-        x_full_train, y_full_train, test_size=0.1, random_state=42
+    train_loader, val_loader, x_test, y_test, wavelength = load_reflection_spectra_dataloaders(
+        DATASET_PATH,
+        test_fraction=0.25
     )
 
-    print(f"train: {x_train.shape}, val: {x_val.shape}, test: {x_test.shape}")
-    
-    train_dataset = ReflectivityDataset(x_train, y_train)
-    val_dataset   = ReflectivityDataset(x_val, y_val)
-    
-    trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    valloader   = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-
     # setup model
-    mlp = ForwardMLP()
-    loss_function = nn.MSELoss() 
-    optimizer = torch.optim.Adam(mlp.parameters(), lr=lr)
+    mlp = ForwardMLP(
+        hidden_layers=layers,
+        activation_name="GELU"
+    )
 
-    arch_version = "01"
-    model_dir = "__models"
-    model_name = f"{model_dir}/mlp_model_{arch_version}.pth"
+    w_amp = float(os.getenv("W_AMP"))
+    w_fd = float(os.getenv("W_FD"))
+    w_sd = float(os.getenv("W_SD"))
+    w_wass = float(os.getenv("W_WASS"))
+    print("loss weights", w_amp, w_fd, w_sd, w_wass)
+    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_sd,w_wass)
+
+    optimizer = torch.optim.AdamW(mlp.parameters(), lr=lr, weight_decay=1.5e-05)
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=patience
+    )
+
+    arch_version = os.getenv("ARCH_VERSION")
+    model_dir = os.getenv("MODEL_DIR")
+    model_name = f"mlp_{arch_version}_{epochs}"
+    model_path = f"{model_dir}/{model_name}.pth"
+    print("final model path", model_path)
     os.makedirs(model_dir, exist_ok=True)
 
     # plots
     train_loss_history = []
     val_loss_history = []
     best_val_loss = float('inf')
+    best_val_epoch = 0
 
     # training loop
-    if not os.path.exists(model_name):
+    if not os.path.exists(model_path):
+        print()
         print("Starting training...")
         
-        for epoch in range(epochs):
+        tq = tqdm(range(epochs))
+        for epoch in tq:
             mlp.train() # model in training mode
             running_train_loss = 0.0
 
-            for i, (inputs, targets) in enumerate(trainloader):
+            for i, (inputs, targets) in enumerate(train_loader):
                 inputs = inputs.view(inputs.size(0), -1)
                 targets = targets.view(targets.size(0), -1)
 
@@ -87,22 +89,31 @@ if __name__ == '__main__':
                 running_train_loss += loss.item()
 
             # average training loss
-            avg_train_loss = running_train_loss / len(trainloader)
+            avg_train_loss = running_train_loss / len(train_loader)
             train_loss_history.append(avg_train_loss)
 
             # validation loss
-            avg_val_loss = validate_model(mlp, valloader, loss_function)
+            avg_val_loss = validate_model(mlp, val_loader, loss_function)
             val_loss_history.append(avg_val_loss)
 
-            print(f'epoch {epoch+1}/{epochs} | train loss: {avg_train_loss:.5f} | val loss: {avg_val_loss:.5f}')
+            # Step the scheduler
+            scheduler.step(avg_val_loss)
+            
+            current_lr = optimizer.param_groups[0]['lr']
+            tq.set_description_str(f'Train: {avg_train_loss:.5f} | Val: {avg_val_loss:.5f} | LR: {current_lr:.6f} | Best Val: {best_val_loss:.5f} ({best_val_epoch})')
+            # TODO log epochs
 
             # early stopping: save best model
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                torch.save(mlp.state_dict(), model_name)
-                print(f"saved best model with val_loss {best_val_loss}")
+                torch.save(mlp.state_dict(), model_path)
+                best_val_epoch = epoch
 
         print('training finished')
+
+        # save parameters file to model folder
+        model_params_path = f"{model_dir}/{model_name}_params.env"
+        copy2("params.env", model_params_path)
 
         # plot train and val loss
         plt.figure(figsize=(10, 5))
@@ -113,12 +124,12 @@ if __name__ == '__main__':
         plt.title('Training vs Validation Loss')
         plt.legend()
         plt.grid(True)
-        plt.savefig(f"{model_dir}/mlp_pytorch_loss_curve.png")
+        plt.savefig(f"{model_dir}/loss_curve_{model_name}.png")
         
 
     else:
-        print(f"loading existing model from {model_name}")
-        mlp.load_state_dict(torch.load(model_name))
+        print(f"loading existing model from {model_path}")
+        mlp.load_state_dict(torch.load(model_path))
 
     # eval model on test set
     mlp.eval()
@@ -136,5 +147,6 @@ if __name__ == '__main__':
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
+    peak_shift = evaluate_peak_shift(y_test, y_pred, wavelength)
 
-    print(f"test - MSE: {mse:.6f} | MAE: {mae:.6f} | R2: {r2:.6f}")
+    print(f"test - MSE: {mse:.6f} | MAE: {mae:.6f} | R2: {r2:.6f} | PS: {peak_shift:.6f}")

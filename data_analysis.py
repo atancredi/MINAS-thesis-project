@@ -19,3 +19,14 @@ def analyze_distribution(data):
 
     return mean, std, min_val, max_val, skew_val, kurtosis_val 
 
+
+if __name__ == "__main__":
+
+    import matplotlib.pyplot as plt
+    from dataloader import load_reflection_spectra_data
+
+    x_train, x_test, y_train, y_test, wavelengths = load_reflection_spectra_data(DATASET_PATH)
+
+    # show some spectra
+    plt.plot(wavelengths, y_train[1].reshape(-1))
+    plt.show()

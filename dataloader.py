@@ -1,6 +1,7 @@
 import pickle
 import os
 
+import torch
 import numpy as np
 import h5py
 from sklearn.model_selection import train_test_split
@@ -56,4 +57,51 @@ def print_data_stats(data):
     x_mean, x_std, x_min, x_max, x_skew, x_kurtosis = analyze_distribution(data)
     print(f"mean: {x_mean:.3f} | stdev: {x_std:.3f} | min: {x_min:.3f} | max: {x_max:.3f} | skew: {x_skew:.3f} | kurt: {x_kurtosis:.3f}")
 
+
+class ReflectivityDataset(torch.utils.data.Dataset):
+
+	def __init__(self, X, y, image=False):
+		if not torch.is_tensor(X) and not torch.is_tensor(y):
+			X = torch.from_numpy(X)
+			y = torch.from_numpy(y)
+
+		# # squeeze
+		# X = X.squeeze()
+		# y = y.squeeze()
+
+		if image:
+			y = y.view(-1,9,9)
+
+		self.X = X
+		self.y = y
+
+	def __len__(self):
+		return len(self.X)
+
+	def __getitem__(self, i):
+		return self.X[i], self.y[i]
+
+
+
+def load_reflection_spectra_dataloaders(
+    dataset_path: str,
+    test_fraction: float = 0.05,
+    batch_size = 32
+):
     
+    x_full_train, x_test, y_full_train, y_test, wavelength = load_reflection_spectra_data(dataset_path, test_fraction=test_fraction)
+
+    x_train, x_val, y_train, y_val = train_test_split(
+        x_full_train, y_full_train, test_size=0.1, random_state=42
+    )
+
+    print(f"train: {x_train.shape}, val: {x_val.shape}, test: {x_test.shape}")
+    
+    train_dataset = ReflectivityDataset(x_train, y_train)
+    val_dataset   = ReflectivityDataset(x_val, y_val)
+    
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    val_loader   = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+
+    return train_loader, val_loader, x_test, y_test, wavelength
+
