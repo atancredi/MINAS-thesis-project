@@ -1,4 +1,5 @@
 import torch
+import json
 import os
 import numpy as np
 from tqdm import tqdm
@@ -25,13 +26,17 @@ if __name__ == '__main__':
     batch_size = int(os.getenv("BATCH_SIZE"))
     patience = int(os.getenv("PATIENCE"))
     print("lr:", lr, "epochs:", epochs, "batch size:", batch_size, "patience:", patience)
+
+    normalize_spectra = False if int(os.getenv("NORMALIZE_SPECTRA")) == 0 else True
+    print("normalize spectra:", normalize_spectra)
     
     torch.manual_seed(42)
     np.random.seed(42)
 
     train_loader, val_loader, x_test, y_test, wavelength = load_reflection_spectra_dataloaders(
         DATASET_PATH,
-        test_fraction=0.25
+        test_fraction=0.25,
+        normalize_spectra=normalize_spectra
     )
 
     # setup model
@@ -150,3 +155,13 @@ if __name__ == '__main__':
     peak_shift = evaluate_peak_shift(y_test, y_pred, wavelength)
 
     print(f"test - MSE: {mse:.6f} | MAE: {mae:.6f} | R2: {r2:.6f} | PS: {peak_shift:.6f}")
+
+    # dump results to file
+    results = {
+        "mse": mse,
+        "mae": mae,
+        "r2": r2,
+        "peak_shift": peak_shift
+    }
+    json.dump(results, open(f"{model_dir}/results_{model_name}.json", "w+"))
+    

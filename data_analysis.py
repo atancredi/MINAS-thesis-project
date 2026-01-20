@@ -25,7 +25,16 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from dataloader import load_reflection_spectra_data
 
-    x_train, x_test, y_train, y_test, wavelengths = load_reflection_spectra_data(DATASET_PATH)
+    x_train, x_test, y_train, y_test, wavelengths = load_reflection_spectra_data(DATASET_PATH, normalize_spectra=True)
+
+    print(y_train.shape)
+    print(y_test.shape)
+
+    # does all the dips starts from 1?
+    print("max y train", y_train.flatten().max())
+    print("min y train", y_train.flatten().min())
+    print("max y test", y_test.flatten().max())
+    print("min y test", y_test.flatten().min())
 
     # show some spectra
     plt.plot(wavelengths, y_train[1].reshape(-1))
