@@ -5,14 +5,15 @@ import numpy as np
 from tqdm import tqdm
 from shutil import copy2
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from dotenv import load_dotenv
 load_dotenv("params.env")
 
 from dataloader import load_reflection_spectra_dataloaders
 from mlp_pytorch import ForwardMLP
 from loss import ResonancePeaksLoss
-from training_utils import validate_model, evaluate_peak_shift
+from test_model import test_model
+from training_utils import validate_model, parity_plot, MathEncoder
+from metrics import evaluate_resonance_metrics
 
 DATASET_PATH = os.getenv("DATASET_PATH")
 
@@ -49,8 +50,9 @@ if __name__ == '__main__':
     w_fd = float(os.getenv("W_FD"))
     w_sd = float(os.getenv("W_SD"))
     w_wass = float(os.getenv("W_WASS"))
-    print("loss weights", w_amp, w_fd, w_sd, w_wass)
-    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_sd,w_wass)
+    w_sam = float(os.getenv("W_SAM"))
+    print("loss weights", w_amp, w_fd, w_sd, w_wass, w_sam)
+    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_sd,w_wass,w_sam)
 
     optimizer = torch.optim.AdamW(mlp.parameters(), lr=lr, weight_decay=1.5e-05)
 
@@ -68,6 +70,7 @@ if __name__ == '__main__':
     # plots
     train_loss_history = []
     val_loss_history = []
+    lr_history = []
     best_val_loss = float('inf')
     best_val_epoch = 0
 
@@ -106,7 +109,7 @@ if __name__ == '__main__':
             
             current_lr = optimizer.param_groups[0]['lr']
             tq.set_description_str(f'Train: {avg_train_loss:.5f} | Val: {avg_val_loss:.5f} | LR: {current_lr:.6f} | Best Val: {best_val_loss:.5f} ({best_val_epoch})')
-            # TODO log epochs
+            lr_history.append(current_lr)
 
             # early stopping: save best model
             if avg_val_loss < best_val_loss:
@@ -120,16 +123,30 @@ if __name__ == '__main__':
         model_params_path = f"{model_dir}/{model_name}_params.env"
         copy2("params.env", model_params_path)
 
+        # XXX MERGE
         # plot train and val loss
         plt.figure(figsize=(10, 5))
         plt.plot(train_loss_history, label='Training Loss')
         plt.plot(val_loss_history, label='Validation Loss', linestyle='--')
         plt.xlabel('Epochs')
-        plt.ylabel('MSE Loss')
-        plt.title('Training vs Validation Loss')
+        plt.ylabel('Loss')
+        plt.title('Training & Validation Loss')
         plt.legend()
         plt.grid(True)
-        plt.savefig(f"{model_dir}/loss_curve_{model_name}.png")
+        plt.savefig(f"{model_dir}/{model_name}_loss_curve.png")
+
+        # log plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(train_loss_history, label='Train Loss', alpha=0.7)
+        plt.plot(val_loss_history, label='Val Loss', alpha=0.7)
+        plt.yscale('log')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss (Log Scale)')
+        plt.legend()
+        plt.grid(True, which="both", ls="-", alpha=0.2)
+        plt.title("Training & Validation Loss (Log Scale)")
+        plt.savefig(f"{model_dir}/{model_name}_loss_curve_log.png")
+        plt.close()
         
 
     else:
@@ -138,30 +155,34 @@ if __name__ == '__main__':
 
     # eval model on test set
     mlp.eval()
+
+    # parity plot
+    parity_plot_path = f"{model_dir}/{model_name}_parity_plot.png"
+    parity_plot(val_loader, parity_plot_path, mlp)
+    print("generated parity plot")
     
     x_test_tensor = torch.from_numpy(x_test).float().view(x_test.shape[0], -1)
     
     with torch.no_grad():
         y_pred = mlp(x_test_tensor)
-
     y_pred = y_pred.numpy()
 
-    # metrics
     y_test = y_test.squeeze()
     y_pred = y_pred.squeeze()
-    mse = mean_squared_error(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    peak_shift = evaluate_peak_shift(y_test, y_pred, wavelength)
-
-    print(f"test - MSE: {mse:.6f} | MAE: {mae:.6f} | R2: {r2:.6f} | PS: {peak_shift:.6f}")
+    
+    # tests
+    results = evaluate_resonance_metrics(y_test, y_pred, wavelength)
+    print(f"  MSE:          {results['mse']:.6f}")
+    print(f"  MAE:          {results['mae']:.6f}")
+    print(f"  R2:           {results['r2']:.6f}")
+    print(f"  Avg Shift:    {results['avg_peak_shift']:.6f} [nm]")
+    print(f"  Max Shift:    {results['max_peak_shift']:.6f} [nm]")
+    print(f"  Depth Error:  {results['avg_depth_error']:.6f}")
+    print(f"  SAM:          {results['avg_sam']:.6f}")
+    print(f"  Dip-only MSE: {results['roi_mse']:.6f}")
 
     # dump results to file
-    results = {
-        "mse": mse,
-        "mae": mae,
-        "r2": r2,
-        "peak_shift": peak_shift
-    }
-    json.dump(results, open(f"{model_dir}/results_{model_name}.json", "w+"))
-    
+    json.dump(results, open(f"{model_dir}/{model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
+
+    # model test
+    test_model(mlp, loss_function, x_test, y_test, 2, f"{model_dir}/{model_name}_test.png")

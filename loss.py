@@ -4,12 +4,15 @@ import torch.nn.functional as F
 
 
 class ResonancePeaksLoss(nn.Module):
-    def __init__(self, w_amp=1.0, w_grad=2.0, w_sec_grad=2.0, w_wass=1.0):
+    def __init__(self, w_amp=1.0, w_grad=2.0, w_sec_grad=2.0, w_wass=1.0, w_sam=0.1):
         super().__init__()
         self.w_amp = w_amp
         self.w_grad = w_grad
         self.w_sec_grad = w_sec_grad
         self.w_wass = w_wass
+        self.w_sam = w_sam
+
+        self.cosine = nn.CosineSimilarity(dim=1, eps=1e-8)
 
     def get_derivatives(self, x):
         return x[:, 1:] - x[:, :-1]
@@ -31,7 +34,15 @@ class ResonancePeaksLoss(nn.Module):
         return torch.mean(torch.abs(cdf_tensor_a-cdf_tensor_b))
 
     def forward(self, y_pred, y_true):
-        weights = 1.0 + 5.0 * (1.0 - y_true)
+        # # loss v1
+        # weights = 1.0 + 5.0 * (1.0 - y_true)
+
+        # loss v2 - exponential weighting to give priority to the most important peaks
+        peaks_importance = (1.0 - y_true)**3
+        max_vals, _ = torch.max(peaks_importance, dim=1, keepdim=True)
+        peaks_importance = peaks_importance / (max_vals + 1e-6) # [0,1] range
+        weights = 1.0 + (self.w_amp * peaks_importance)
+
         loss_amp = self.weighted_mse(y_pred, y_true, weights)
 
         grad_pred = self.get_derivatives(y_pred)
@@ -50,8 +61,13 @@ class ResonancePeaksLoss(nn.Module):
         wass_true = wass_true / torch.sum(wass_true, dim=1, keepdim=True)
         loss_wass = self.wasserstein_loss(wass_pred, wass_true)
 
-        return (self.w_amp * loss_amp) + \
+        # loss v2 - cosine similarity loss
+        # spectral angle mapper
+        loss_sam = torch.mean(1.0 - self.cosine(y_pred, y_true))
+
+        return loss_amp + \
                (self.w_grad * loss_grad) + \
                (self.w_sec_grad * loss_sec_grad) + \
-               (self.w_wass * loss_wass)
+               (self.w_wass * loss_wass) + \
+               (self.w_sam * loss_sam)
     

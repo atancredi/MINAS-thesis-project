@@ -1,6 +1,18 @@
 import torch
 import numpy as np
 
+import matplotlib.pyplot as plt
+
+from json import JSONEncoder
+class MathEncoder(JSONEncoder):
+    def default(self, o):
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, np.float32) or isinstance(o, np.float64):
+            return float(o)
+        return o.__dict__
+
+
 def validate_model(model, val_loader, criterion):
     model.eval()
     running_val_loss = 0.0
@@ -42,3 +54,43 @@ def evaluate_peak_shift(y_true, y_pred, wavelengths):
     print("avg shift", avg_shift)
 
     return avg_shift
+
+def parity_plot(val_loader, parity_plot_path, model, k=400):
+    true_peaks = []
+    pred_peaks = []
+
+    # get statistics from k samples of validation set
+    with torch.no_grad():
+        for i, (inputs, targets) in enumerate(val_loader):
+            if i > k: break
+
+            inputs = inputs.squeeze()
+            targets = targets.squeeze()
+            
+            preds = model(inputs)
+            
+            # argmin - index of minimum value (dip)
+            batch_true_peaks = torch.argmin(targets, dim=1).cpu().numpy()
+            batch_pred_peaks = torch.argmin(preds, dim=1).cpu().numpy()
+            
+            true_peaks.extend(batch_true_peaks)
+            pred_peaks.extend(batch_pred_peaks)
+    
+    # parity
+    plt.figure(figsize=(8, 8))
+    plt.scatter(true_peaks, pred_peaks, alpha=0.5, s=15, color='#1f77b4', edgecolor='k', linewidth=0.5)
+    
+    # diagonal line - perfect alignment
+    limit_min = min(min(true_peaks), min(pred_peaks))
+    limit_max = max(max(true_peaks), max(pred_peaks))
+    plt.plot([limit_min, limit_max], [limit_min, limit_max], 'r--', label='Perfect Match', linewidth=2)
+    
+    plt.xlabel("True Peak Index")
+    plt.ylabel("Predicted Peak Index")
+    plt.title("Parity Plot\n(Points on the line = Perfect Alignment)")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.savefig(parity_plot_path)
+    plt.close()
+    
