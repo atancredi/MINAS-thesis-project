@@ -48,11 +48,10 @@ if __name__ == '__main__':
 
     w_amp = float(os.getenv("W_AMP"))
     w_fd = float(os.getenv("W_FD"))
-    w_sd = float(os.getenv("W_SD"))
     w_wass = float(os.getenv("W_WASS"))
     w_sam = float(os.getenv("W_SAM"))
-    print("loss weights", w_amp, w_fd, w_sd, w_wass, w_sam)
-    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_sd,w_wass,w_sam)
+    print("loss weights", w_amp, w_fd, w_wass, w_sam)
+    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam)
 
     optimizer = torch.optim.AdamW(mlp.parameters(), lr=lr, weight_decay=1.5e-05)
 
@@ -123,29 +122,43 @@ if __name__ == '__main__':
         model_params_path = f"{model_dir}/{model_name}_params.env"
         copy2("params.env", model_params_path)
 
-        # XXX MERGE
         # plot train and val loss
-        plt.figure(figsize=(10, 5))
-        plt.plot(train_loss_history, label='Training Loss')
-        plt.plot(val_loss_history, label='Validation Loss', linestyle='--')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-        plt.title('Training & Validation Loss')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(f"{model_dir}/{model_name}_loss_curve.png")
+        fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        # lr drops
+        lr = np.array(lr_history)
+        drop_epochs = np.where(lr[1:] < lr[:-1])[0] + 1  # +1 to align epoch index
 
-        # log plot
-        plt.figure(figsize=(10, 5))
-        plt.plot(train_loss_history, label='Train Loss', alpha=0.7)
-        plt.plot(val_loss_history, label='Val Loss', alpha=0.7)
-        plt.yscale('log')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss (Log Scale)')
-        plt.legend()
-        plt.grid(True, which="both", ls="-", alpha=0.2)
-        plt.title("Training & Validation Loss (Log Scale)")
-        plt.savefig(f"{model_dir}/{model_name}_loss_curve_log.png")
+        axes[0].plot(train_loss_history, label='Training Loss')
+        axes[0].plot(val_loss_history, label='Validation Loss', linestyle='--')
+        axes[0].set_ylabel('Loss')
+        axes[0].set_title('Training & Validation Loss')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+
+        for e in drop_epochs:
+            axes[0].axvline(e, color='red', linestyle='--', alpha=0.6)
+            axes[0].text(
+                e, axes[0].get_ylim()[1],
+                f"LR → {lr[e]:.1e}",
+                color='red',
+                fontsize=9,
+                rotation=90,
+                verticalalignment='top',
+                horizontalalignment='right'
+            )
+
+        axes[1].plot(train_loss_history, label='Training Loss', alpha=0.8)
+        axes[1].plot(val_loss_history, label='Validation Loss', linestyle='--', alpha=0.8)
+        axes[1].set_yscale('log')
+        axes[1].set_xlabel('Epochs')
+        axes[1].set_ylabel('Loss (Log Scale)')
+        axes[1].grid(True, which="both", alpha=0.3)
+
+        for e in drop_epochs:
+            axes[1].axvline(e, color='red', linestyle='--', alpha=0.6)
+
+        plt.tight_layout()
+        plt.savefig(f"{model_dir}/{model_name}_loss_curve.png", dpi=300)
         plt.close()
         
 

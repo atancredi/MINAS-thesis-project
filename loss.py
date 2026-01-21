@@ -4,11 +4,10 @@ import torch.nn.functional as F
 
 
 class ResonancePeaksLoss(nn.Module):
-    def __init__(self, w_amp=1.0, w_grad=2.0, w_sec_grad=2.0, w_wass=1.0, w_sam=0.1):
+    def __init__(self, w_amp=10.0, w_grad=5.0, w_wass=2.0, w_sam=1.0):
         super().__init__()
         self.w_amp = w_amp
         self.w_grad = w_grad
-        self.w_sec_grad = w_sec_grad
         self.w_wass = w_wass
         self.w_sam = w_sam
 
@@ -16,9 +15,6 @@ class ResonancePeaksLoss(nn.Module):
 
     def get_derivatives(self, x):
         return x[:, 1:] - x[:, :-1]
-    
-    def get_second_derivatives(self, x):
-        return x[:, 2:] - 2 * x[:, 1:-1] + x[:, :-2]
     
     def weighted_mse(self, input, target, weight):
         return torch.mean(weight * (input - target) ** 2)
@@ -45,13 +41,10 @@ class ResonancePeaksLoss(nn.Module):
 
         loss_amp = self.weighted_mse(y_pred, y_true, weights)
 
+        # first derivatives
         grad_pred = self.get_derivatives(y_pred)
         grad_true = self.get_derivatives(y_true)
         loss_grad = torch.mean((grad_pred - grad_true)**2)
-
-        sec_grad_pred = self.get_second_derivatives(y_pred)
-        sec_grad_true = self.get_second_derivatives(y_true)
-        loss_sec_grad = torch.mean((sec_grad_pred - sec_grad_true)**2)
 
         # create probability density functions
         wass_pred = F.relu(1.0 - y_pred) + 1e-6
@@ -67,7 +60,6 @@ class ResonancePeaksLoss(nn.Module):
 
         return loss_amp + \
                (self.w_grad * loss_grad) + \
-               (self.w_sec_grad * loss_sec_grad) + \
                (self.w_wass * loss_wass) + \
                (self.w_sam * loss_sam)
     
