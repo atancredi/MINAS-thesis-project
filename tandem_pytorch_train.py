@@ -1,4 +1,5 @@
 import torch
+import json
 import torch.nn as nn
 import os
 import numpy as np
@@ -8,12 +9,12 @@ from shutil import copy2
 from dotenv import load_dotenv
 load_dotenv("tandem_params.env")
 
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
 from mlp_pytorch import ForwardMLP
 from dataloader import load_reflection_spectra_dataloaders
 from loss import ResonancePeaksLoss
-from training_utils import validate_tandem_model, evaluate_peak_shift
+from training_utils import validate_tandem_model, MathEncoder
+from metrics import evaluate_resonance_metrics
+from test_model import test_tandem_model
 
 DATASET_PATH = os.getenv("DATASET_PATH")
 MODEL_DIR = os.getenv("MODEL_DIR")
@@ -79,10 +80,10 @@ if __name__ == '__main__':
 
     w_amp = float(os.getenv("W_AMP"))
     w_fd = float(os.getenv("W_FD"))
-    w_sd = float(os.getenv("W_SD"))
     w_wass = float(os.getenv("W_WASS"))
-    print("loss weights", w_amp, w_fd, w_sd, w_wass)
-    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_sd,w_wass)
+    w_sam = float(os.getenv("W_SAM"))
+    print("loss weights", w_amp, w_fd, w_wass, w_sam)
+    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam)
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=patience
@@ -99,6 +100,7 @@ if __name__ == '__main__':
     # plots
     train_loss_history = []
     val_loss_history = []
+    lr_history = []
     best_val_loss = float('inf')
     best_val_epoch = 0
 
@@ -137,7 +139,7 @@ if __name__ == '__main__':
             
             current_lr = optimizer.param_groups[0]['lr']
             tq.set_description_str(f'Train: {avg_train_loss:.5f} | Val: {avg_val_loss:.5f} | LR: {current_lr:.6f} | Best Val: {best_val_loss:.5f} ({best_val_epoch})')
-            # TODO log epochs
+            lr_history.append(current_lr)
 
             # early stopping: save best model
             if avg_val_loss < best_val_loss:
@@ -152,15 +154,43 @@ if __name__ == '__main__':
         copy2("tandem_params.env", model_params_path)
 
         # plot train and val loss
-        plt.figure(figsize=(10, 5))
-        plt.plot(train_loss_history, label='Training Loss')
-        plt.plot(val_loss_history, label='Validation Loss', linestyle='--')
-        plt.xlabel('Epochs')
-        plt.ylabel('MSE Loss')
-        plt.title('Training vs Validation Loss')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(f"{model_dir}/loss_curve_{model_name}.png")
+        fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        # lr drops
+        lr = np.array(lr_history)
+        drop_epochs = np.where(lr[1:] < lr[:-1])[0] + 1  # +1 to align epoch index
+
+        axes[0].plot(train_loss_history, label='Training Loss')
+        axes[0].plot(val_loss_history, label='Validation Loss', linestyle='--')
+        axes[0].set_ylabel('Loss')
+        axes[0].set_title('Training & Validation Loss')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+
+        for e in drop_epochs:
+            axes[0].axvline(e, color='red', linestyle='--', alpha=0.6)
+            axes[0].text(
+                e, axes[0].get_ylim()[1],
+                f"LR → {lr[e]:.1e}",
+                color='red',
+                fontsize=9,
+                rotation=90,
+                verticalalignment='top',
+                horizontalalignment='right'
+            )
+
+        axes[1].plot(train_loss_history, label='Training Loss', alpha=0.8)
+        axes[1].plot(val_loss_history, label='Validation Loss', linestyle='--', alpha=0.8)
+        axes[1].set_yscale('log')
+        axes[1].set_xlabel('Epochs')
+        axes[1].set_ylabel('Loss (Log Scale)')
+        axes[1].grid(True, which="both", alpha=0.3)
+
+        for e in drop_epochs:
+            axes[1].axvline(e, color='red', linestyle='--', alpha=0.6)
+
+        plt.tight_layout()
+        plt.savefig(f"{model_dir}/{model_name}_loss_curve.png", dpi=300)
+        plt.close()
         
 
     else:
@@ -176,13 +206,21 @@ if __name__ == '__main__':
         geo_prediction, spectra_reconstructed = tandem_model(test_spectra)
 
     pred_spectra = spectra_reconstructed.numpy()
+    test_spectra = test_spectra.numpy()
 
-    # metrics
-    y_test = y_test.squeeze()
-    pred_spectra = pred_spectra.squeeze()
-    mse = mean_squared_error(y_test, pred_spectra)
-    mae = mean_absolute_error(y_test, pred_spectra)
-    r2 = r2_score(y_test, pred_spectra)
-    peak_shift = evaluate_peak_shift(y_test, pred_spectra, wavelength)
+    # tests
+    results = evaluate_resonance_metrics(test_spectra, pred_spectra, wavelength)
+    print(f"  MSE:          {results['mse']:.6f}")
+    print(f"  MAE:          {results['mae']:.6f}")
+    print(f"  R2:           {results['r2']:.6f}")
+    print(f"  Avg Shift:    {results['avg_peak_shift']:.6f} [nm]")
+    print(f"  Max Shift:    {results['max_peak_shift']:.6f} [nm]")
+    print(f"  Depth Error:  {results['avg_depth_error']:.6f}")
+    print(f"  SAM:          {results['avg_sam']:.6f}")
+    print(f"  Dip-only MSE: {results['roi_mse']:.6f}")
 
-    print(f"test - MSE: {mse:.6f} | MAE: {mae:.6f} | R2: {r2:.6f} | PS: {peak_shift:.6f}")
+    # dump results to file
+    json.dump(results, open(f"{model_dir}/{model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
+
+    # model test
+    test_tandem_model(loss_function, test_spectra, pred_spectra, 2, f"{model_dir}/{model_name}_test.png")

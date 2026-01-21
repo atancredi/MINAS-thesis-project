@@ -42,3 +42,40 @@ def test_model(model, criterion, x_test, y_test, n: int, output_path: str):
     
     plt.legend()
     plt.savefig(output_path)
+
+
+def test_tandem_model(criterion, test_spectra, pred_spectra, n: int, output_path: str):
+
+    
+    total_samples = len(test_spectra)
+    indices = sample(range(total_samples), k=n)
+    print(f"indices", indices)
+
+    fig, ax = plt.subplots(ncols=n,nrows=1,figsize=(int(5*n), 3))
+    if n==1:
+        ax = [ax]
+    
+    for i, idx in enumerate(indices):
+
+        y_pred = pred_spectra[idx] 
+        y_sample = test_spectra[idx]
+
+        # XXX
+        y_true = torch.as_tensor(y_sample, dtype=torch.float32).view(1, -1)
+        y_pred = torch.as_tensor(y_pred, dtype=torch.float32).view(1, -1)
+
+        total = criterion(y_pred, y_true)
+
+        print(f"loss {total.item():.5f}")
+
+        y_true_np = y_true.detach().numpy().flatten()
+        y_pred_np = y_pred.detach().numpy().flatten()
+
+        ax[i].plot(y_true_np, label='Ground Truth', color='black', linewidth=2, linestyle='--')
+        ax[i].plot(y_pred_np, label='MLP Prediction', color='#d62728', linewidth=2)
+        ax[i].fill_between(range(len(y_true_np)), y_true_np, y_pred_np, color='gray', alpha=0.2, label='Error')
+        ax[i].set_title(f"Loss Analysis (Idx {idx}): Total={total.item():.4f}")
+        ax[i].grid(True, alpha=0.3)
+    
+    plt.legend()
+    plt.savefig(output_path)    
