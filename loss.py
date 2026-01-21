@@ -4,13 +4,14 @@ import torch.nn.functional as F
 
 
 class ResonancePeaksLoss(nn.Module):
-    def __init__(self, w_amp=10.0, w_grad=5.0, w_wass=2.0, w_sam=1.0):
+    def __init__(self, w_amp=10.0, w_grad=5.0, w_wass=2.0, w_sam=1.0, peaks_importance=True):
         super().__init__()
         self.w_amp = w_amp
         self.w_grad = w_grad
         self.w_wass = w_wass
         self.w_sam = w_sam
 
+        self.peaks_importance = peaks_importance
         self.cosine = nn.CosineSimilarity(dim=1, eps=1e-8)
 
     def get_derivatives(self, x):
@@ -34,13 +35,15 @@ class ResonancePeaksLoss(nn.Module):
         # weights = 1.0 + 5.0 * (1.0 - y_true)
 
         # loss v2 - exponential weighting to give priority to the most important peaks
-        peaks_importance = (1.0 - y_true)**3
-        max_vals, _ = torch.max(peaks_importance, dim=1, keepdim=True)
-        peaks_importance = peaks_importance / (max_vals + 1e-6) # [0,1] range
-        weights = 1.0 + (self.w_amp * peaks_importance)
-
-        loss_amp = self.weighted_mse(y_pred, y_true, weights)
-
+        if self.peaks_importance:
+            peaks_importance = (1.0 - y_true)**3
+            max_vals, _ = torch.max(peaks_importance, dim=1, keepdim=True)
+            peaks_importance = peaks_importance / (max_vals + 1e-6) # [0,1] range
+            weights = 1.0 + (self.w_amp * peaks_importance)
+            loss_amp = self.weighted_mse(y_pred, y_true, weights)
+        else:
+            loss_amp = self.w_amp * torch.mean((y_pred - y_true) ** 2)
+        
         # first derivatives
         grad_pred = self.get_derivatives(y_pred)
         grad_true = self.get_derivatives(y_true)

@@ -94,3 +94,18 @@ def parity_plot(val_loader, parity_plot_path, model, k=400):
     plt.savefig(parity_plot_path)
     plt.close()
     
+
+############################################################################################################
+# DATA DIMENSIONALITY CHECKS
+
+def unsqueeze_2d_tensor(x):
+    is_2d = x.dim() == 2
+    if is_2d:
+        x = x.unsqueeze(1) # [Batch, Length] -> [Batch, 1, Length]
+    return x
+
+def squeeze_3d_tensor(x):
+    is_3d = x.dim() == 2
+    if is_3d and x.shape[1] == 1:
+        x = x.squeeze(1)  # [Batch, 1, Length] -> [Batch, Length]
+    return x

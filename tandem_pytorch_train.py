@@ -16,6 +16,8 @@ from training_utils import validate_tandem_model, MathEncoder
 from metrics import evaluate_resonance_metrics
 from test_model import test_tandem_model
 
+from augment_data import RandomGaussianBlur1D
+
 DATASET_PATH = os.getenv("DATASET_PATH")
 MODEL_DIR = os.getenv("MODEL_DIR")
 
@@ -83,7 +85,7 @@ if __name__ == '__main__':
     w_wass = float(os.getenv("W_WASS"))
     w_sam = float(os.getenv("W_SAM"))
     print("loss weights", w_amp, w_fd, w_wass, w_sam)
-    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam)
+    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam,peaks_importance=False)
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=patience
@@ -104,6 +106,9 @@ if __name__ == '__main__':
     best_val_loss = float('inf')
     best_val_epoch = 0
 
+    augmenter = RandomGaussianBlur1D(kernel_size=5, sigma_range=(1.0, 2.0), p=0.5)
+    
+
     # training loop
     if not os.path.exists(model_path):
         print()
@@ -118,9 +123,12 @@ if __name__ == '__main__':
                 inputs = inputs.view(inputs.size(0), -1)
                 targets = targets.view(targets.size(0), -1)
 
+                targets = augmenter(targets)
+
                 optimizer.zero_grad()
                 geo_prediction, spectra_reconstructed = tandem_model(targets)
-                loss = loss_function(spectra_reconstructed, targets.squeeze())
+                
+                loss = loss_function(spectra_reconstructed.squeeze(), targets.squeeze())
                 loss.backward()
                 optimizer.step()
 
