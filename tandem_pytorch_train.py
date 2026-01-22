@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv("tandem_params.env")
 
 from mlp_pytorch import ForwardMLP
+from cnn_pytorch_inverse import InverseCNN
 from dataloader import load_reflection_spectra_dataloaders
 from loss import ResonancePeaksLoss
 from training_utils import validate_tandem_model, MathEncoder
@@ -68,7 +69,8 @@ if __name__ == '__main__':
 
     # define forward and inverse models
     forward_model = ForwardMLP(activation_name="GELU") 
-    inverse_model = ForwardMLP(input_dim=81, output_dim=4, activation_name="GELU") 
+    # inverse_model = ForwardMLP(input_dim=81, output_dim=4, activation_name="GELU") 
+    inverse_model = InverseCNN(output_geom_dim=4)
 
     # load last trained forward model    
     forward_model.load_state_dict(torch.load(FORWARD_MODEL_NAME))
@@ -85,7 +87,7 @@ if __name__ == '__main__':
     w_wass = float(os.getenv("W_WASS"))
     w_sam = float(os.getenv("W_SAM"))
     print("loss weights", w_amp, w_fd, w_wass, w_sam)
-    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam,peaks_importance=False)
+    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam,peaks_importance=True)
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=patience
@@ -127,6 +129,9 @@ if __name__ == '__main__':
 
                 optimizer.zero_grad()
                 geo_prediction, spectra_reconstructed = tandem_model(targets)
+                # # XXX penalize physically unallowed predictions
+                # if any([x < 0 for x in geo_prediction.view(-1)]):
+                #     print("predicted a geometry with negative values")
                 
                 loss = loss_function(spectra_reconstructed.squeeze(), targets.squeeze())
                 loss.backward()

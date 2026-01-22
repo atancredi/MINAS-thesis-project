@@ -44,15 +44,16 @@ def main(model_path, forward_model_path, dataset_path, output_path):
     criterion = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam)
 
     from generate_spectra import generate_spectrum
-    spectrum_test, params = generate_spectrum(num_points=81, num_peaks=1, peak_type='gaussian', noise_level=0.001)
+    spectrum_test, params = generate_spectrum(num_points=81, num_peaks=3, peak_type='lorentzian', noise_level=0.001)
     print(params)
 
     from tandem_pytorch_train import TandemModel
     from mlp_pytorch import ForwardMLP
-    from cnn_pytorch_inverse import InverseMetricsCNN
+    from cnn_pytorch_inverse import InverseCNN
     # define forward and inverse models
     forward_model = ForwardMLP(activation_name="GELU") 
-    inverse_model = ForwardMLP(input_dim=81, output_dim=4, activation_name="GELU") 
+    # inverse_model = ForwardMLP(input_dim=81, output_dim=4, activation_name="GELU") 
+    inverse_model = InverseCNN(output_geom_dim=4)
 
     # load last trained forward model    
     forward_model.load_state_dict(torch.load(forward_model_path))
