@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
 
-from data_analysis import analyze_distribution
+from .data_analysis import analyze_distribution
 
 # date: 06/2023 @author: P. Wiecha
 def load_reflection_spectra_data(path_h5, save_scalers=True, test_fraction=0.05, normalize_spectra=False):

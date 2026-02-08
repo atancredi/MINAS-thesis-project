@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from training_utils import unsqueeze_2d_tensor, squeeze_3d_tensor
+from .training_utils import unsqueeze_2d_tensor, squeeze_3d_tensor
 
 class RandomGaussianBlur1D(nn.Module):
 
