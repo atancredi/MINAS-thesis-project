@@ -11,13 +11,13 @@ load_dotenv("tandem_params.env")
 
 from mlp_pytorch import ForwardMLP
 from cnn_pytorch_inverse import InverseCNN
-from dataloader import load_reflection_spectra_dataloaders
+from utils.dataloader import load_reflection_spectra_dataloaders
 from loss import ResonancePeaksLoss
-from training_utils import validate_tandem_model, MathEncoder
+from utils.training_utils import validate_tandem_model, MathEncoder
 from metrics import evaluate_resonance_metrics
 from test_model import test_tandem_model
 
-from augment_data import RandomGaussianBlur1D
+from utils.augment_data import RandomGaussianBlur1D
 
 DATASET_PATH = os.getenv("DATASET_PATH")
 MODEL_DIR = os.getenv("MODEL_DIR")
@@ -53,6 +53,8 @@ class TandemModel(nn.Module):
 
 if __name__ == '__main__':
 
+    use_augmenter = False
+
     lr = float(os.getenv("LR"))
     epochs = int(os.getenv("EPOCHS"))
     batch_size = int(os.getenv("BATCH_SIZE"))
@@ -68,7 +70,9 @@ if __name__ == '__main__':
     )
 
     # define forward and inverse models
-    forward_model = ForwardMLP(activation_name="GELU") 
+    # layers = [1024,512,256,128]
+    layers = [512,256,128]
+    forward_model = ForwardMLP(hidden_layers=layers, activation_name="GELU") 
     # inverse_model = ForwardMLP(input_dim=81, output_dim=4, activation_name="GELU") 
     inverse_model = InverseCNN(output_geom_dim=4)
 
@@ -108,7 +112,8 @@ if __name__ == '__main__':
     best_val_loss = float('inf')
     best_val_epoch = 0
 
-    augmenter = RandomGaussianBlur1D(kernel_size=5, sigma_range=(1.0, 2.0), p=0.5)
+    if use_augmenter:
+        augmenter = RandomGaussianBlur1D(kernel_size=5, sigma_range=(1.0, 2.0), p=0.5)
     
 
     # training loop
@@ -125,7 +130,8 @@ if __name__ == '__main__':
                 inputs = inputs.view(inputs.size(0), -1)
                 targets = targets.view(targets.size(0), -1)
 
-                targets = augmenter(targets)
+                if use_augmenter:
+                    targets = augmenter(targets)
 
                 optimizer.zero_grad()
                 geo_prediction, spectra_reconstructed = tandem_model(targets)

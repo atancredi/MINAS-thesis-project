@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 load_dotenv("params.env")
 
-from dataloader import load_reflection_spectra_dataloaders
+from utils.training_utils import validate_model, parity_plot, MathEncoder
+from utils.dataloader import load_reflection_spectra_dataloaders
 from mlp_pytorch import ForwardMLP
 from loss import ResonancePeaksLoss
 from test_model import test_model
-from training_utils import validate_model, parity_plot, MathEncoder
 from metrics import evaluate_resonance_metrics
 
 DATASET_PATH = os.getenv("DATASET_PATH")
@@ -21,7 +21,8 @@ DATASET_PATH = os.getenv("DATASET_PATH")
 
 if __name__ == '__main__':
 
-    layers = [1024,512,256,128]
+    # layers = [1024,512,256,128]
+    layers = [512,256,128]
     lr = float(os.getenv("LR"))
     epochs = int(os.getenv("EPOCHS"))
     batch_size = int(os.getenv("BATCH_SIZE"))
@@ -51,7 +52,7 @@ if __name__ == '__main__':
     w_wass = float(os.getenv("W_WASS"))
     w_sam = float(os.getenv("W_SAM"))
     print("loss weights", w_amp, w_fd, w_wass, w_sam)
-    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam)
+    loss_function = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam,peaks_importance=False)
 
     optimizer = torch.optim.AdamW(mlp.parameters(), lr=lr, weight_decay=1.5e-05)
 
