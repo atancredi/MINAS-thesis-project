@@ -25,16 +25,18 @@ from model_trainer import ModelTrainer
 ranges = {
     'w_amp':  (10.0, 50.0),
     'w_grad': (50.0, 5.0),
-    'w_wass': (1.0, 20.0),
+    'w_wass': (20.0, 5.0),
     'w_sam':  (1.0, 10.0)
 }
 
 tandem_ranges = {
-    'w_amp':  (10.0, 50.0),
-    'w_grad': (10.0, 50.0),
+    'w_amp':  (1.0, 100.0),
+    'w_grad': (1.0, 50.0),
     'w_wass': (20.0, 1.0),
-    'w_sam':  (1.0, 1.0)
+    'w_sam':  (10.0, 1.0)
 }
+
+use_loss_v2 = True
 
 
 from generated_spectra_test import reconstruct_and_evaluate
@@ -102,7 +104,8 @@ if __name__ == '__main__':
         w_grad=ranges['w_grad'][0], 
         w_wass=ranges['w_wass'][0], 
         w_sam=ranges['w_sam'][0],
-        peaks_importance=True
+        peaks_importance=True,
+        v2=use_loss_v2
     )
 
     loss_scheduler = LossScheduler(
@@ -150,7 +153,8 @@ if __name__ == '__main__':
             w_amp=checkpoint['loss_config']['w_amp'], 
             w_grad=checkpoint['loss_config']['w_grad'], 
             w_wass=checkpoint['loss_config']['w_wass'], 
-            w_sam=checkpoint['loss_config']['w_sam']
+            w_sam=checkpoint['loss_config']['w_sam'],
+            v2=use_loss_v2
         )
         mlp.load_state_dict(checkpoint["model_state_dict"])
 
@@ -238,7 +242,8 @@ if __name__ == '__main__':
         w_grad=tandem_ranges['w_grad'][0], 
         w_wass=tandem_ranges['w_wass'][0], 
         w_sam=tandem_ranges['w_sam'][0],
-        peaks_importance=True
+        peaks_importance=True,
+        v2=use_loss_v2
     )
     loss_scheduler = LossScheduler(
         loss_function, 
@@ -292,7 +297,8 @@ if __name__ == '__main__':
             w_amp=checkpoint['loss_config']['w_amp'], 
             w_grad=checkpoint['loss_config']['w_grad'], 
             w_wass=checkpoint['loss_config']['w_wass'], 
-            w_sam=checkpoint['loss_config']['w_sam']
+            w_sam=checkpoint['loss_config']['w_sam'],
+            v2=use_loss_v2
         )
         tandem_model.load_state_dict(checkpoint["model_state_dict"])
 
