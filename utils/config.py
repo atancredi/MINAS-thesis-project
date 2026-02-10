@@ -36,10 +36,10 @@ class TrainingConfig:
         self.batch_size = int(os.getenv("BATCH_SIZE"))
         self.patience = int(os.getenv("PATIENCE"))
     
-        self.w_amp = float(os.getenv("W_AMP"))
-        self.w_fd = float(os.getenv("W_FD"))
-        self.w_wass = float(os.getenv("W_WASS"))
-        self.w_sam = float(os.getenv("W_SAM"))
+        self.w_amp = float(os.getenv("W_AMP") or 0)
+        self.w_fd = float(os.getenv("W_FD") or 0)
+        self.w_wass = float(os.getenv("W_WASS") or 0)
+        self.w_sam = float(os.getenv("W_SAM") or 0)
 
         if forward_model_name != None:
             self.forward_model_name = forward_model_name

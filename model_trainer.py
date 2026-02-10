@@ -17,7 +17,8 @@ class ModelTrainer:
         loss_function,
         optimizer,
         scheduler,
-        augmenter = None
+        augmenter = None,
+        loss_scheduler = None
     ):    
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -32,6 +33,7 @@ class ModelTrainer:
         self.best_val_epoch = 0
 
         self.augmenter = augmenter
+        self.loss_scheduler = loss_scheduler
 
 
     def training_loop(self, model, validator, config: TrainingConfig, inverse: bool):
@@ -40,6 +42,13 @@ class ModelTrainer:
         for epoch in tq:
             model.train() # model in training mode
             running_train_loss = 0.0
+
+            if self.loss_scheduler:
+                current_weights = self.loss_scheduler.step(epoch)
+        
+                if epoch % 10 == 0:
+                    print(f"Epoch {epoch} Weights: {current_weights}")
+
 
             for i, (inputs, targets) in enumerate(self.train_loader):
                 inputs = inputs.view(inputs.size(0), -1)
@@ -73,7 +82,7 @@ class ModelTrainer:
             avg_val_loss = validator(model, self.val_loader, self.loss_function)
             self.val_loss_history.append(avg_val_loss)
 
-            # Step the scheduler
+            # Step the lr scheduler
             self.scheduler.step(avg_val_loss)
             
             current_lr = self.optimizer.param_groups[0]['lr']
@@ -83,7 +92,17 @@ class ModelTrainer:
             # early stopping: save best model
             if avg_val_loss < self.best_val_loss:
                 self.best_val_loss = avg_val_loss
-                torch.save(model.state_dict(), config.model_path)
+                checkpoint = {
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'loss_config': {
+                        'w_amp': self.loss_function.w_amp,
+                        'w_grad': self.loss_function.w_grad,
+                        'w_wass': self.loss_function.w_wass,
+                        'w_sam': self.loss_function.w_sam
+                    }
+                }
+                torch.save(checkpoint, config.model_path)
                 self.best_val_epoch = epoch
 
 

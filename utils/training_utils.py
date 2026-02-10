@@ -38,8 +38,8 @@ def validate_tandem_model(tandem_model, val_loader, criterion):
             inputs = inputs.view(inputs.size(0), -1)
             targets = targets.view(targets.size(0), -1)
             
-            x_prediction, y_reconstructed = tandem_model(targets)
-            loss = criterion(y_reconstructed, targets.squeeze())
+            geo_prediction, spectrum_reconstructed = tandem_model(targets)
+            loss = criterion(spectrum_reconstructed, targets.squeeze())
             running_val_loss += loss.item()
             
     avg_val_loss = running_val_loss / len(val_loader)

@@ -24,3 +24,21 @@ class TandemModel(nn.Module):
         reconstructed_forward_y = self.forward_model(predicted_inverse_y)
         
         return predicted_inverse_y, reconstructed_forward_y
+
+
+if __name__ == "__main__":
+
+    from mlp_pytorch import ForwardMLP
+    from cnn_pytorch_inverse import InverseCNN
+
+    fwd = ForwardMLP(hidden_layers=[1024,512,256,128], activation_name="GELU")
+    inv = InverseCNN()
+
+    model = TandemModel(fwd, inv)
+
+    from torchview import draw_graph
+    # depth=1 mostra solo i blocchi principali (es. InverseNet e ForwardNet)
+    # depth=2 entra dentro e mostra i Linear, ReLU, ecc.
+    model_graph = draw_graph(model, input_size=(1, 81), depth=1, expand_nested=True)
+
+    model_graph.visual_graph.render("tandem_torchview_1", format="png")
