@@ -2,3 +2,11 @@ __data*/
 __models*/
 __dump*/
 __pycache__/
+__resimulations/
+lorentzian_peak_tests/
+plots/
+results/
+
+res_*
+
+*.csv

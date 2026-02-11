@@ -95,13 +95,14 @@ class ModelTrainer:
                 checkpoint = {
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
-                    'loss_config': {
+                }
+                if "w_amp" in self.loss_function.__dict__:
+                    checkpoint['loss_config'] = {
                         'w_amp': self.loss_function.w_amp,
                         'w_grad': self.loss_function.w_grad,
                         'w_wass': self.loss_function.w_wass,
                         'w_sam': self.loss_function.w_sam
                     }
-                }
                 torch.save(checkpoint, config.model_path)
                 self.best_val_epoch = epoch
 

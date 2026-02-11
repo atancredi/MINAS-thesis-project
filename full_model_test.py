@@ -37,15 +37,16 @@ tandem_ranges = {
 }
 
 use_loss_v2 = False
-use_mse_loss = True
 
 
 from generated_spectra_test import reconstruct_and_evaluate
-def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, output_path = "res.png"):
+def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, scaler = None, output_path = "res.png"):
     # reconstruct and evaluate spectra
     metrics, reconstructed_numpy, predicted_geo_numpy = reconstruct_and_evaluate(tandem_model, [spectrum_test], wavelengths)
 
-    print(scaler_geo_tandem.inverse_transform(predicted_geo_numpy))    
+    if scaler != None:
+        predicted_geo_numpy = scaler.inverse_transform(predicted_geo_numpy)
+    print(predicted_geo_numpy, "- scaled" if scaler else "")    
     
     print(metrics, predicted_geo_numpy)
 
@@ -75,6 +76,8 @@ def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, outp
 
     plt.savefig(output_path) 
     plt.close()
+
+    return predicted_geo_numpy, y_pred, y_true, total.item()
 
 
 if __name__ == '__main__':
@@ -119,10 +122,6 @@ if __name__ == '__main__':
         w_sam_range=ranges['w_sam']
     )
 
-    if use_mse_loss:
-        loss_function = torch.nn.MSELoss()
-        loss_scheduler = None
-
     optimizer = torch.optim.AdamW(mlp.parameters(), lr=training_config.learning_rate, weight_decay=1.5e-05)
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -132,37 +131,17 @@ if __name__ == '__main__':
     print("final model path", training_config.model_path)
     os.makedirs(training_config.model_dir, exist_ok=True)
 
-    # training loop
-    if not os.path.exists(training_config.model_path):
-        print()
-        print("Starting training...")
-        
-        trainer = ModelTrainer(
-            train_loader,
-            val_loader,
-            loss_function,
-            optimizer,
-            scheduler,
-            loss_scheduler=loss_scheduler
-        )
+    print(f"loading existing model from {training_config.model_path}")
+    checkpoint = torch.load(training_config.model_path, weights_only=False)
+    loss_function = ResonancePeaksLoss(
+        w_amp=checkpoint['loss_config']['w_amp'], 
+        w_grad=checkpoint['loss_config']['w_grad'], 
+        w_wass=checkpoint['loss_config']['w_wass'], 
+        w_sam=checkpoint['loss_config']['w_sam'],
+        v2=use_loss_v2
+    )
+    mlp.load_state_dict(checkpoint["model_state_dict"])
 
-        trainer.training_loop(mlp, validate_model, training_config, inverse=False)
-        print('training finished')
-
-        trainer.training_stats(training_config)        
-
-    else:
-        print(f"loading existing model from {training_config.model_path}")
-        checkpoint = torch.load(training_config.model_path, weights_only=False)
-        if not use_mse_loss:
-            loss_function = ResonancePeaksLoss(
-                w_amp=checkpoint['loss_config']['w_amp'], 
-                w_grad=checkpoint['loss_config']['w_grad'], 
-                w_wass=checkpoint['loss_config']['w_wass'], 
-                w_sam=checkpoint['loss_config']['w_sam'],
-                v2=use_loss_v2
-            )
-        mlp.load_state_dict(checkpoint["model_state_dict"])
 
     # eval model on test set
     mlp.eval()
@@ -194,11 +173,11 @@ if __name__ == '__main__':
 
     results["weights_ranges"] = ranges
 
-    # dump results to file
-    json.dump(results, open(f"{training_config.model_dir}/{training_config.model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
+    # # dump results to file
+    # json.dump(results, open(f"{training_config.model_dir}/{training_config.model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
 
-    # model test
-    test_model(mlp, loss_function, x_test, y_test, 2, f"{training_config.model_dir}/{training_config.model_name}_test.png")
+    # # model test
+    # test_model(mlp, loss_function, x_test, y_test, 2, f"{training_config.model_dir}/{training_config.model_name}_test.png")
 
 
     print()
@@ -261,10 +240,6 @@ if __name__ == '__main__':
         w_sam_range=tandem_ranges['w_sam']
     )
 
-    if use_mse_loss:
-        loss_function = torch.nn.MSELoss()
-        loss_scheduler = None
-
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=config.patience
     )
@@ -276,43 +251,18 @@ if __name__ == '__main__':
         augmenter = RandomGaussianBlur1D(kernel_size=5, sigma_range=(1.0, 2.0), p=0.5)
     
 
-    # training loop
-    if not os.path.exists(config.model_path):
-        print()
-        print("Starting training...")
-        
-        
-        from model_trainer import ModelTrainer
-        trainer = ModelTrainer(
-            train_loader,
-            val_loader,
-            loss_function,
-            optimizer,
-            scheduler,
-            augmenter,
-            loss_scheduler=loss_scheduler
-        )
+    print(f"loading existing model from {config.model_path}")
+    checkpoint = torch.load(config.model_path, weights_only=False)
+    loss_function = ResonancePeaksLoss(
+        w_amp=checkpoint['loss_config']['w_amp'], 
+        w_grad=checkpoint['loss_config']['w_grad'], 
+        w_wass=checkpoint['loss_config']['w_wass'], 
+        w_sam=checkpoint['loss_config']['w_sam'],
+        v2=use_loss_v2
+    )
+    tandem_model.load_state_dict(checkpoint["model_state_dict"])
 
-        trainer.training_loop(tandem_model, validate_tandem_model, config, inverse=True)
-
-        print('training finished')
-
-        trainer.training_stats(config)
-        
-
-    else:
-        print(f"loading existing model from {config.model_path}")
-        checkpoint = torch.load(config.model_path, weights_only=False)
-        if not use_mse_loss:
-            loss_function = ResonancePeaksLoss(
-                w_amp=checkpoint['loss_config']['w_amp'], 
-                w_grad=checkpoint['loss_config']['w_grad'], 
-                w_wass=checkpoint['loss_config']['w_wass'], 
-                w_sam=checkpoint['loss_config']['w_sam'],
-                v2=use_loss_v2
-            )
-        tandem_model.load_state_dict(checkpoint["model_state_dict"])
-
+    
     # eval model on test set
     tandem_model.eval()
     
@@ -325,25 +275,6 @@ if __name__ == '__main__':
     pred_spectra = spectra_reconstructed.numpy()
     test_spectra = test_spectra.numpy()
 
-
-    print("test geometries")
-    designs_predict_physical = scaler_geo.inverse_transform(geo_prediction)
-    designs_predict_physical = designs_predict_physical[:9]
-    sep = np.expand_dims(designs_predict_physical[:,3] - np.maximum(designs_predict_physical[:,1], designs_predict_physical[:,2]), axis=1)
-    print(sep.shape)
-    designs_predict_physical = np.hstack((np.expand_dims(designs_predict_physical[:,0], axis=1), sep, designs_predict_physical[:,[1,2,3]]))
-    print('h_pill (um)', 'sep (um)', 'd_pill (um)', 'w_pill (um)', 'Period Probe')
-    print(designs_predict_physical)
-    print()
-    np.savetxt(os.path.join('geo_params.csv'), designs_predict_physical[:, :4], delimiter=',', header='h_pill, sep, d_pill, w_pill', comments='') # used for re simulation
-
-    print("saving related reonstructed spectra")
-    test_pred_spectra = pred_spectra[:9]
-    np.savetxt(os.path.join('pred_spectra.csv'), test_pred_spectra[:, :81], delimiter=',')
-
-    print("saving test spectra and geometries samples")
-    np.savetxt(os.path.join('test_spectra.csv'), test_spectra[:9], delimiter=',')
-    np.savetxt(os.path.join('test_geometries.csv'), test_geo[:9], delimiter=',')
 
     # tests
     results = evaluate_resonance_metrics(test_spectra, pred_spectra, wavelength)
@@ -358,11 +289,11 @@ if __name__ == '__main__':
 
     results["weights_ranges"] = tandem_ranges
 
-    # dump results to file
-    json.dump(results, open(f"{config.model_dir}/{config.model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
+    # # dump results to file
+    # json.dump(results, open(f"{config.model_dir}/{config.model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
 
-    # model test
-    test_tandem_model(loss_function, test_spectra, pred_spectra, 2, f"{config.model_dir}/{config.model_name}_test.png")
+    # # model test
+    # test_tandem_model(loss_function, test_spectra, pred_spectra, 2, f"{config.model_dir}/{config.model_name}_test.png")
 
 
     print()
@@ -371,29 +302,69 @@ if __name__ == '__main__':
     print()
     print()
 
+
+    # # instead of generating spectrum, use an augmented test sample
+    # rng = np.random.default_rng()
+    # test_i = int(len(y_test) * rng.random())
+    # test_spectrum = torch.from_numpy(y_test[test_i]).float().view(y_test[test_i].shape[0], -1)
+    # from utils.dataloader import apply_smooth_flattening, compute_peak_bounds
+    # bounds = compute_peak_bounds(test_spectrum.numpy().squeeze(), 3)
+    # aug_signal = apply_smooth_flattening(test_spectrum.numpy().squeeze(), bounds)
+    # spectrum_test = aug_signal
+    # reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, output_path = "res_augmented_sample.png")
+
     from utils.generate_spectra import generate_spectrum
-    spectrum_test, params = generate_spectrum(
-        num_points=81,
-        num_peaks=1,
-        # peak_type='lorentzian',
-        peak_type='gaussian',
-        noise_level=0.001,
-        peak_spread=0.2
-    )
-    print(params)
-
-    reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, output_path = "res_generated.png")
-
-    # instead of generating spectrum, use an augmented test sample
-    rng = np.random.default_rng()
-    test_i = int(len(y_test) * rng.random())
-    test_spectrum = torch.from_numpy(y_test[test_i]).float().view(y_test[test_i].shape[0], -1)
-    from utils.dataloader import apply_smooth_flattening, compute_peak_bounds
-    bounds = compute_peak_bounds(test_spectrum.numpy().squeeze(), 3)
-    aug_signal = apply_smooth_flattening(test_spectrum.numpy().squeeze(), bounds)
-    spectrum_test = aug_signal
 
 
-    reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, output_path = "res_augmented_sample.png")
+    tests_folder = "lorentzian_peak_tests/v3_ls_04_4layers/"
+    os.makedirs(tests_folder, exist_ok=True)
+
+
+    all_designs_predict_physical = []
+    all_y_pred = []
+    all_y_true = []
+
+    test_i = 0
+    while len(all_designs_predict_physical) < 9:
+        spectrum_test, params = generate_spectrum(
+            num_points=81,
+            num_peaks=1,
+            peak_type='lorentzian',
+            # peak_type='gaussian',
+            noise_level=0.001,
+            peak_spread=0.15
+        )
+
+        # i don't know the 'true' geometries because the spectrum is arbitrarily generated
+        # geometries are already rescaled
+        predicted_geo_numpy, y_pred, y_true, loss = reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, scaler=scaler_geo_tandem, output_path = f"lorentzian_peak_tests/v3_ls_04_4layers/res_generated_{test_i}.png")
+
+        if loss > 1.75:
+            continue
+
+
+        print("test geometries")
+        designs_predict_physical = predicted_geo_numpy
+        sep = np.expand_dims(designs_predict_physical[:,3] - np.maximum(designs_predict_physical[:,1], designs_predict_physical[:,2]), axis=1)
+        # print(sep.shape)
+        designs_predict_physical = np.hstack((np.expand_dims(designs_predict_physical[:,0], axis=1), sep, designs_predict_physical[:,[1,2,3]]))
+        # print('h_pill (um)', 'sep (um)', 'd_pill (um)', 'w_pill (um)', 'Period Probe')
+        # print(designs_predict_physical)
+        # print()
+
+
+        all_designs_predict_physical.append(designs_predict_physical[:, :4][0])
+        all_y_pred.append(y_pred[:, :81][0])
+        all_y_true.append(y_true[:, :81][0])
+
+        test_i += 1
+    
+    np.savetxt(os.path.join(tests_folder, 'geo_params.csv'), all_designs_predict_physical, delimiter=',', header='h_pill, sep, d_pill, w_pill', comments='') # used for re simulation
+
+    print("saving related reonstructed spectra")
+    np.savetxt(os.path.join(tests_folder, 'pred_spectra.csv'), all_y_pred, delimiter=',')
+
+    print("saving test spectra and geometries samples")
+    np.savetxt(os.path.join(tests_folder, 'test_spectra.csv'), all_y_true, delimiter=',')
 
 
