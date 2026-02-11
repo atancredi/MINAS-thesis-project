@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 
 from metrics import evaluate_resonance_metrics
-from dataloader import load_reflection_spectra_data
+from utils.dataloader import load_reflection_spectra_data
 from loss import ResonancePeaksLoss
 
 def reconstruct_and_evaluate(model, input_spectra, wavelength_grid):
@@ -31,10 +31,21 @@ def reconstruct_and_evaluate(model, input_spectra, wavelength_grid):
 
 
 
-def main(model_path, forward_model_path, dataset_path, output_path):
+def main(output_path):
 
+    
     from dotenv import load_dotenv
     load_dotenv("tandem_params.env")
+
+    epochs = int(os.getenv("EPOCHS"))
+    arch_version = os.getenv("ARCH_VERSION")
+    model_dir = os.getenv("MODEL_DIR")
+    model_name = f"tandem_{arch_version}_{epochs}"
+    model_path = f"{model_dir}/{model_name}.pth"
+    print("tandem model path", model_path)
+
+    dataset_path = os.getenv("DATASET_PATH")
+    forward_model_path = os.getenv("FORWARD_MODEL_NAME")
 
     w_amp = float(os.getenv("W_AMP"))
     w_fd = float(os.getenv("W_FD"))
@@ -43,7 +54,7 @@ def main(model_path, forward_model_path, dataset_path, output_path):
     print("loss weights", w_amp, w_fd, w_wass, w_sam)
     criterion = ResonancePeaksLoss(w_amp,w_fd,w_wass,w_sam)
 
-    from generate_spectra import generate_spectrum
+    from utils.generate_spectra import generate_spectrum
     spectrum_test, params = generate_spectrum(num_points=81, num_peaks=3, peak_type='lorentzian', noise_level=0.001)
     print(params)
 
@@ -51,7 +62,9 @@ def main(model_path, forward_model_path, dataset_path, output_path):
     from mlp_pytorch import ForwardMLP
     from cnn_pytorch_inverse import InverseCNN
     # define forward and inverse models
-    forward_model = ForwardMLP(activation_name="GELU") 
+    # layers = [1024,512,256,128]
+    layers = [512,256,128]
+    forward_model = ForwardMLP(hidden_layers=layers, activation_name="GELU") 
     # inverse_model = ForwardMLP(input_dim=81, output_dim=4, activation_name="GELU") 
     inverse_model = InverseCNN(output_geom_dim=4)
 
