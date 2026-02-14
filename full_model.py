@@ -37,15 +37,15 @@ tandem_ranges = {
 }
 
 use_loss_v2 = False
-use_mse_loss = True
+use_mse_loss = False
 
 
 from generated_spectra_test import reconstruct_and_evaluate
-def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, output_path = "res.png"):
+def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, geo_test = None, output_path = "res.png"):
     # reconstruct and evaluate spectra
     metrics, reconstructed_numpy, predicted_geo_numpy = reconstruct_and_evaluate(tandem_model, [spectrum_test], wavelengths)
 
-    print(scaler_geo_tandem.inverse_transform(predicted_geo_numpy))    
+    predicted_geo_numpy = scaler_geo_tandem.inverse_transform(predicted_geo_numpy)
     
     print(metrics, predicted_geo_numpy)
 
@@ -64,14 +64,25 @@ def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, outp
     y_pred_np = y_pred.detach().numpy().flatten()
 
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1,1)
-    ax.plot(y_true_np, label='Ground Truth', color='black', linewidth=2, linestyle='--')
-    ax.plot(y_pred_np, label='MLP Prediction', color='#d62728', linewidth=2)
-    ax.fill_between(range(len(y_true_np)), y_true_np, y_pred_np, color='gray', alpha=0.2, label='Error')
-    plt.title(f"Loss: {total.item():.4f}")
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    label_pred = " ".join([f'{x:.3f}' for x in predicted_geo_numpy[0]])
+    label = ""
+    if geo_test != None:
+        label = " " + " ".join([f'{x:.3f}' for x in geo_test])
+    ax.plot(wavelengths, y_true_np, label=f'Target{label}', color='black', linewidth=2, linestyle='--')
+    ax.plot(wavelengths, y_pred_np, label=f'Prediction {label_pred}', color='#d62728', linewidth=2)
+    # ax.fill_between(range(len(y_true_np)), y_true_np, y_pred_np, color='gray', alpha=0.2, label='Error')
+    # plt.title(f"Loss: {total.item():.4f}")
     plt.grid(True, alpha=0.3)
+
+    model_str = " (Normal Loss)" if use_mse_loss else " (Physics-Informed Loss)"
+    fig.suptitle(f"Prediction of test dataset sample{model_str}", fontsize=16)
+    ax.set_xlabel("Frequency (THz)")
+    ax.set_ylabel("Reflectance")
+
     
-    plt.legend()
+    ax.legend(title="Params. $h_{pill}$, $sep$, $d_{pill}$, $w_{pill}$ all $\mu m$")
+    # plt.legend()
 
     plt.savefig(output_path) 
     plt.close()
@@ -382,7 +393,7 @@ if __name__ == '__main__':
     )
     print(params)
 
-    reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, output_path = "res_generated.png")
+    reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, None, output_path = "res_generated.png")
 
     # instead of generating spectrum, use an augmented test sample
     rng = np.random.default_rng()

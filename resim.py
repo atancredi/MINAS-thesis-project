@@ -103,7 +103,7 @@ def plot_resimulated_spectrum(source: str, spectrum_index: int, out_file = "resi
     fig.suptitle(f"Re-simulation of {type_str} design", fontsize=16)
 
     ax.legend(title="Params. $h_{pill}$, $sep$, $d_{pill}$, $w_{pill}$ all $\mu m$")
-    handles, labels = ax.get_legend_handles_labels()
+    # handles, labels = ax.get_legend_handles_labels()
     # fig.legend(handles, labels, loc='center right', 
         #    title="Params. $h_{pill}$, $sep$, $d_{pill}$, $w_{pill}$ [$\mu m]$")
 

@@ -12,3 +12,4 @@ res_*
 *.csv
 
 plots/
+tandem_tests/

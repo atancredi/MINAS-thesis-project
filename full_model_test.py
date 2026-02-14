@@ -1,53 +1,39 @@
 import torch
-import json
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 
-
-from utils.augment_data import RandomGaussianBlur1D
-
-from utils.config import TrainingConfig
-
-from tandem_model import TandemModel
-
-
-from utils.config import TrainingConfig
-from utils.training_utils import validate_model, parity_plot, MathEncoder, validate_tandem_model
-from utils.dataloader import load_reflection_spectra_dataloaders, load_reflection_spectra_data
 from mlp_pytorch import ForwardMLP
 from cnn_pytorch_inverse import InverseCNN
-from loss import ResonancePeaksLoss, LossScheduler
-from test_model import test_model, test_tandem_model
-from metrics import evaluate_resonance_metrics
+from loss import ResonancePeaksLoss
+from tandem_model import TandemModel
+from test_model import test_tandem_model
 
-from model_trainer import ModelTrainer
-
-ranges = {
-    'w_amp':  (0.5, 0.3),
-    'w_grad': (0.1, 0.5),
-    'w_wass': (0.3, 0.1),
-    'w_sam':  (0.1, 0.1)
-}
-
-tandem_ranges = {
-    'w_amp':  (0.1, 0.8),
-    'w_grad': (0.2, 0.1),
-    'w_wass': (0.6, 0.05),
-    'w_sam':  (0.1, 0.05)
-}
-
-use_loss_v2 = False
-
-
+from utils.generate_spectra import generate_spectrum
+from utils.dataloader import apply_smooth_flattening, compute_peak_bounds, load_reflection_spectra_dataloaders
+from utils.config import TrainingConfig
 from generated_spectra_test import reconstruct_and_evaluate
-def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, scaler = None, output_path = "res.png"):
+
+
+def reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spectrum_test, title_str, scaler = None, output_path = "res.png"):
+    
+    def get_geo_str(geo):
+        if scaler != None:
+            geo_transformed = scaler.inverse_transform(geo.reshape(1, -1))[0]
+            return " ".join([f"{i:.3f}" for i in geo_transformed])
+        else: return ""
+    
     # reconstruct and evaluate spectra
     metrics, reconstructed_numpy, predicted_geo_numpy = reconstruct_and_evaluate(tandem_model, [spectrum_test], wavelengths)
 
+    designs_predict_physical = None
     if scaler != None:
         predicted_geo_numpy = scaler.inverse_transform(predicted_geo_numpy)
-    print(predicted_geo_numpy, "- scaled" if scaler else "")    
+        designs_predict_physical = predicted_geo_numpy
+        sep = np.expand_dims(designs_predict_physical[:,3] - np.maximum(designs_predict_physical[:,1], designs_predict_physical[:,2]), axis=1)
+        designs_predict_physical = np.hstack((np.expand_dims(designs_predict_physical[:,0], axis=1), sep, designs_predict_physical[:,[1,2,3]]))
     
+    print(predicted_geo_numpy, "- scaled" if scaler else "")    
     print(metrics, predicted_geo_numpy)
 
     y_pred = reconstructed_numpy
@@ -64,132 +50,64 @@ def reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, scal
     y_true_np = y_true.detach().numpy().flatten()
     y_pred_np = y_pred.detach().numpy().flatten()
 
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1,1)
-    ax.plot(y_true_np, label='Ground Truth', color='black', linewidth=2, linestyle='--')
-    ax.plot(y_pred_np, label='MLP Prediction', color='#d62728', linewidth=2)
-    ax.fill_between(range(len(y_true_np)), y_true_np, y_pred_np, color='gray', alpha=0.2, label='Error')
-    plt.title(f"Loss: {total.item():.4f}")
-    plt.grid(True, alpha=0.3)
-    
-    plt.legend()
 
+    fig, ax = plt.subplots(1,1, figsize=(12, 6))
+    ax.plot(wavelengths, y_true_np, label = f"Target", linestyle='--', color='red')
+    pred_geo_str = get_geo_str(predicted_geo_numpy)
+    ax.plot(wavelengths, y_pred_np, label = f"Predicted {pred_geo_str}")
+    
+    ax.legend(title="Params. $h_{pill}$, $sep$, $d_{pill}$, $w_{pill}$ all $\mu m$")
+
+    fig.suptitle(title_str, fontsize=16)
+    ax.set_xlabel("Frequency (THz)")
+    ax.set_ylabel("Reflectance")
+
+    plt.tight_layout()
     plt.savefig(output_path) 
-    plt.close()
+    
 
     return predicted_geo_numpy, y_pred, y_true, total.item()
 
 
-if __name__ == '__main__':
+def test_tandem_model(test_type: str, use_mse=False):
 
-    layers = [1024,512,256,128]
-    # layers = [512,256,128]
+
     training_config = TrainingConfig("mlp", "params.env")
-    training_config.print()
-
-    torch.manual_seed(42)
-    np.random.seed(42)
-
-    train_loader, val_loader, x_test, y_test, wavelength, scaler_geo = load_reflection_spectra_dataloaders(
-        training_config.dataset_path,
-        test_fraction=0.25,
-        augment_spectra=False,
-        p_aug=0.0
-    )
-
-    # setup model
-    mlp = ForwardMLP(
-        hidden_layers=layers,
-        activation_name="GELU"
-    )
-
-    loss_function = ResonancePeaksLoss(
-        w_amp=ranges['w_amp'][0], 
-        w_grad=ranges['w_grad'][0], 
-        w_wass=ranges['w_wass'][0], 
-        w_sam=ranges['w_sam'][0],
-        peaks_importance=True,
-        v2=use_loss_v2
-    )
-
-    loss_scheduler = LossScheduler(
-        loss_function, 
-        total_epochs=training_config.epochs,
-        num_cycles=1,         # 1 cycle = linear ramp; >1 = warm restarts
-        w_amp_range=ranges['w_amp'],
-        w_grad_range=ranges['w_grad'],
-        w_wass_range=ranges['w_wass'],
-        w_sam_range=ranges['w_sam']
-    )
-
-    optimizer = torch.optim.AdamW(mlp.parameters(), lr=training_config.learning_rate, weight_decay=1.5e-05)
-
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=training_config.patience
-    )
-
-    print("final model path", training_config.model_path)
-    os.makedirs(training_config.model_dir, exist_ok=True)
-
-    print(f"loading existing model from {training_config.model_path}")
-    checkpoint = torch.load(training_config.model_path, weights_only=False)
-    loss_function = ResonancePeaksLoss(
-        w_amp=checkpoint['loss_config']['w_amp'], 
-        w_grad=checkpoint['loss_config']['w_grad'], 
-        w_wass=checkpoint['loss_config']['w_wass'], 
-        w_sam=checkpoint['loss_config']['w_sam'],
-        v2=use_loss_v2
-    )
-    mlp.load_state_dict(checkpoint["model_state_dict"])
+    # training_config.print()
 
 
-    # eval model on test set
-    mlp.eval()
-
-    # parity plot
-    parity_plot_path = f"{training_config.model_dir}/{training_config.model_name}_parity_plot.png"
-    parity_plot(val_loader, parity_plot_path, mlp)
-    print("generated parity plot")
+    if test_type == "t":
+        print("Testing augmented test samples")
+        test_aug = True
+        tests_folder = "tandem_tests/v3_ls_04_4layers/test_peaks/"
+        title_str = "Prediction of test dataset sample"
+    elif test_type == "g":
+        print("Testing generated samples")
+        test_aug = False
+        tests_folder = "tandem_tests/v3_ls_04_4layers/generated_peaks/"
+        title_str = "Prediction of generated sample"
+    else:
+        raise ValueError("test_type must be t or g")
     
-    x_test_tensor = torch.from_numpy(x_test).float().view(x_test.shape[0], -1)
     
-    with torch.no_grad():
-        y_pred = mlp(x_test_tensor)
-    y_pred = y_pred.numpy()
+    if use_mse:
+        print("using MSE loss")
+        forward_model_path = "__models/official/version_mse/mlp_mse_20.pth"
+        tandem_model_path = "__models/official/version_mse/tandem_cnn_mse_20.pth"
+        title_str = title_str + " (MSE Loss)"
+        tests_folder = os.path.join(tests_folder, "mse/")
+    else:
+        print("using PIL loss")
+        forward_model_path = "__models/official/version001/mlp_v3_ls_04_4layers_80.pth"
+        tandem_model_path = "__models/official/version001/tandem_cnn_v3_ls_04_4layers_50.pth"
+        title_str = title_str + " (Physics-Informed Loss)"
+        tests_folder = os.path.join(tests_folder, "pil/")
 
-    y_test = y_test.squeeze()
-    y_pred = y_pred.squeeze()
-    
-    # tests
-    results = evaluate_resonance_metrics(y_test, y_pred, wavelength)
-    print(f"  MSE:          {results['mse']:.6f}")
-    print(f"  MAE:          {results['mae']:.6f}")
-    print(f"  R2:           {results['r2']:.6f}")
-    print(f"  Avg Shift:    {results['avg_peak_shift']:.6f} [nm]")
-    print(f"  Max Shift:    {results['max_peak_shift']:.6f} [nm]")
-    print(f"  Depth Error:  {results['avg_depth_error']:.6f}")
-    print(f"  SAM:          {results['avg_sam']:.6f}")
-    print(f"  Dip-only MSE: {results['roi_mse']:.6f}")
+    print(title_str)
+    print(tests_folder)
+    print(forward_model_path)
+    print(tandem_model_path)
 
-    results["weights_ranges"] = ranges
-
-    # # dump results to file
-    # json.dump(results, open(f"{training_config.model_dir}/{training_config.model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
-
-    # # model test
-    # test_model(mlp, loss_function, x_test, y_test, 2, f"{training_config.model_dir}/{training_config.model_name}_test.png")
-
-
-    print()
-    print()
-    print("# TANDEM MODEL ######################################################################################")
-    print()
-    print()
-
-    
-    use_augmenter = False
-    augmenter = None
-    
     config = TrainingConfig("tandem","tandem_params.env", forward_model_name=training_config.model_path)
     config.print()
     
@@ -203,130 +121,54 @@ if __name__ == '__main__':
         p_aug=0.0
     )
 
-    # # define forward and inverse models
-    # # layers = [1024,512,256,128]
-    # layers = [512,256,128]
+    # define forward and inverse models
+    layers = [1024,512,256,128]
     forward_model = ForwardMLP(hidden_layers=layers, activation_name="GELU") 
-    # inverse_model = ForwardMLP(input_dim=81, output_dim=4, activation_name="GELU") 
     inverse_model = InverseCNN(output_geom_dim=4)
 
-    # load last trained forward model
 
-    checkpoint = torch.load(config.forward_model_name, weights_only=False)
+    # load last trained forward model
+    print(f"loading last trained forward model from {forward_model_path}")
+    checkpoint = torch.load(forward_model_path, weights_only=False)
     forward_model.load_state_dict(checkpoint["model_state_dict"])
-    # forward_model = mlp
+
 
     # define tandem model
     tandem_model = TandemModel(inverse_model=inverse_model, forward_model=forward_model)
     
-    # optimizer on inverse model's parameters
-    optimizer = torch.optim.Adam(tandem_model.inverse_model.parameters(), lr=config.learning_rate)
-
-    loss_function = ResonancePeaksLoss(
-        w_amp=tandem_ranges['w_amp'][0], 
-        w_grad=tandem_ranges['w_grad'][0], 
-        w_wass=tandem_ranges['w_wass'][0], 
-        w_sam=tandem_ranges['w_sam'][0],
-        peaks_importance=True,
-        v2=use_loss_v2
-    )
-    loss_scheduler = LossScheduler(
-        loss_function, 
-        total_epochs=training_config.epochs,
-        num_cycles=1,         # 1 cycle = linear ramp; >1 = warm restarts
-        w_amp_range=tandem_ranges['w_amp'],
-        w_grad_range=tandem_ranges['w_grad'],
-        w_wass_range=tandem_ranges['w_wass'],
-        w_sam_range=tandem_ranges['w_sam']
-    )
-
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=config.patience
-    )
-
-    print("final model path", config.model_path)
-    os.makedirs(config.model_dir, exist_ok=True)
-
-    if use_augmenter:
-        augmenter = RandomGaussianBlur1D(kernel_size=5, sigma_range=(1.0, 2.0), p=0.5)
-    
-
-    print(f"loading existing model from {config.model_path}")
-    checkpoint = torch.load(config.model_path, weights_only=False)
-    loss_function = ResonancePeaksLoss(
-        w_amp=checkpoint['loss_config']['w_amp'], 
-        w_grad=checkpoint['loss_config']['w_grad'], 
-        w_wass=checkpoint['loss_config']['w_wass'], 
-        w_sam=checkpoint['loss_config']['w_sam'],
-        v2=use_loss_v2
-    )
+    print(f"loading existing tandem model from {tandem_model_path}")
+    checkpoint = torch.load(tandem_model_path, weights_only=False)
+    if use_mse:
+        loss_function = torch.nn.MSELoss()
+    else:
+        loss_function = ResonancePeaksLoss(
+            w_amp=checkpoint['loss_config']['w_amp'], 
+            w_grad=checkpoint['loss_config']['w_grad'], 
+            w_wass=checkpoint['loss_config']['w_wass'], 
+            w_sam=checkpoint['loss_config']['w_sam'],
+            v2=False
+        )
     tandem_model.load_state_dict(checkpoint["model_state_dict"])
 
     
     # eval model on test set
     tandem_model.eval()
     
-    test_spectra = torch.from_numpy(y_test).float().view(y_test.shape[0], -1)
-    test_geo = torch.from_numpy(x_test).float().view(x_test.shape[0], -1)
-    
-    with torch.no_grad():
-        geo_prediction, spectra_reconstructed = tandem_model(test_spectra)
 
-    pred_spectra = spectra_reconstructed.numpy()
-    test_spectra = test_spectra.numpy()
-
-
-    # tests
-    results = evaluate_resonance_metrics(test_spectra, pred_spectra, wavelength)
-    print(f"  MSE:          {results['mse']:.6f}")
-    print(f"  MAE:          {results['mae']:.6f}")
-    print(f"  R2:           {results['r2']:.6f}")
-    print(f"  Avg Shift:    {results['avg_peak_shift']:.6f} [nm]")
-    print(f"  Max Shift:    {results['max_peak_shift']:.6f} [nm]")
-    print(f"  Depth Error:  {results['avg_depth_error']:.6f}")
-    print(f"  SAM:          {results['avg_sam']:.6f}")
-    print(f"  Dip-only MSE: {results['roi_mse']:.6f}")
-
-    results["weights_ranges"] = tandem_ranges
-
-    # # dump results to file
-    # json.dump(results, open(f"{config.model_dir}/{config.model_name}_results.json", "w+"), cls=MathEncoder, indent=4)
-
-    # # model test
-    # test_tandem_model(loss_function, test_spectra, pred_spectra, 2, f"{config.model_dir}/{config.model_name}_test.png")
-
-
-    print()
-    print()
-    print("# GENERATED SPECTRA TEST ###############################################################################")
-    print()
-    print()
-
-
-    # # instead of generating spectrum, use an augmented test sample
-    # rng = np.random.default_rng()
-    # test_i = int(len(y_test) * rng.random())
-    # test_spectrum = torch.from_numpy(y_test[test_i]).float().view(y_test[test_i].shape[0], -1)
-    # from utils.dataloader import apply_smooth_flattening, compute_peak_bounds
-    # bounds = compute_peak_bounds(test_spectrum.numpy().squeeze(), 3)
-    # aug_signal = apply_smooth_flattening(test_spectrum.numpy().squeeze(), bounds)
-    # spectrum_test = aug_signal
-    # reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, output_path = "res_augmented_sample.png")
-
-    from utils.generate_spectra import generate_spectrum
-
-
-    tests_folder = "lorentzian_peak_tests/v3_ls_04_4layers/"
     os.makedirs(tests_folder, exist_ok=True)
+    if test_aug:
+        # instead of generating spectrum, use an augmented test sample
+        rng = np.random.default_rng()
+        test_i = int(len(y_test) * rng.random())
+        test_spectrum = torch.from_numpy(y_test[test_i]).float().view(y_test[test_i].shape[0], -1)
+        bounds = compute_peak_bounds(test_spectrum.numpy().squeeze(), 3)
+        aug_signal = apply_smooth_flattening(test_spectrum.numpy().squeeze(), bounds)
+        out_file = os.path.join(tests_folder, "res_augmented_sample.png")
+        reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, aug_signal, title_str=title_str, output_path = out_file)
 
-
-    all_designs_predict_physical = []
-    all_y_pred = []
-    all_y_true = []
-
-    test_i = 0
-    while len(all_designs_predict_physical) < 9:
-        spectrum_test, params = generate_spectrum(
+    else:
+        # generate a spectrum
+        spectrum_test, _ = generate_spectrum(
             num_points=81,
             num_peaks=1,
             peak_type='lorentzian',
@@ -337,34 +179,27 @@ if __name__ == '__main__':
 
         # i don't know the 'true' geometries because the spectrum is arbitrarily generated
         # geometries are already rescaled
-        predicted_geo_numpy, y_pred, y_true, loss = reconstruct_evaluate_spectrum(tandem_model, wavelengths, spectrum_test, scaler=scaler_geo_tandem, output_path = f"lorentzian_peak_tests/v3_ls_04_4layers/res_generated_{test_i}.png")
-
-        if loss > 1.75:
-            continue
-
+        predicted_geo_numpy, y_pred, y_true, _ = reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spectrum_test, title_str=title_str, scaler=scaler_geo_tandem, output_path = os.path.join(tests_folder, f"res_generated.png"))
 
         print("test geometries")
         designs_predict_physical = predicted_geo_numpy
         sep = np.expand_dims(designs_predict_physical[:,3] - np.maximum(designs_predict_physical[:,1], designs_predict_physical[:,2]), axis=1)
-        # print(sep.shape)
         designs_predict_physical = np.hstack((np.expand_dims(designs_predict_physical[:,0], axis=1), sep, designs_predict_physical[:,[1,2,3]]))
         # print('h_pill (um)', 'sep (um)', 'd_pill (um)', 'w_pill (um)', 'Period Probe')
         # print(designs_predict_physical)
         # print()
 
+        np.savetxt(os.path.join(tests_folder, 'geo_params.csv'), designs_predict_physical[:, :4][0][np.newaxis, :], delimiter=',', header='h_pill, sep, d_pill, w_pill', comments='') # used for re simulation
 
-        all_designs_predict_physical.append(designs_predict_physical[:, :4][0])
-        all_y_pred.append(y_pred[:, :81][0])
-        all_y_true.append(y_true[:, :81][0])
+        print("saving related reonstructed spectra")
+        np.savetxt(os.path.join(tests_folder, 'pred_spectra.csv'), y_pred[:, :81][0][np.newaxis, :], delimiter=',')
 
-        test_i += 1
-    
-    np.savetxt(os.path.join(tests_folder, 'geo_params.csv'), all_designs_predict_physical, delimiter=',', header='h_pill, sep, d_pill, w_pill', comments='') # used for re simulation
+        print("saving test spectra and geometries samples")
+        np.savetxt(os.path.join(tests_folder, 'test_spectra.csv'), y_true[:, :81][0][np.newaxis, :], delimiter=',')
 
-    print("saving related reonstructed spectra")
-    np.savetxt(os.path.join(tests_folder, 'pred_spectra.csv'), all_y_pred, delimiter=',')
+    print("Done")
 
-    print("saving test spectra and geometries samples")
-    np.savetxt(os.path.join(tests_folder, 'test_spectra.csv'), all_y_true, delimiter=',')
+if __name__ == '__main__':
 
-
+    from fire import Fire
+    Fire(test_tandem_model)
