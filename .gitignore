@@ -4,9 +4,11 @@ __dump*/
 __pycache__/
 __resimulations/
 lorentzian_peak_tests/
-plots/
+__plots/
 results/
 
 res_*
 
 *.csv
+
+plots/
