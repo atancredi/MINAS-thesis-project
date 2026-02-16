@@ -15,25 +15,12 @@ from utils.config import TrainingConfig
 from generated_spectra_test import reconstruct_and_evaluate
 
 
-def reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spectrum_test, title_str, scaler = None, output_path = "res.png"):
-    
-    def get_geo_str(geo):
-        if scaler != None:
-            geo_transformed = scaler.inverse_transform(geo.reshape(1, -1))[0]
-            return " ".join([f"{i:.3f}" for i in geo_transformed])
-        else: return ""
+def reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spectrum_test, scaler, title_str, output_path = "res.png"):
+
     
     # reconstruct and evaluate spectra
     metrics, reconstructed_numpy, predicted_geo_numpy = reconstruct_and_evaluate(tandem_model, [spectrum_test], wavelengths)
-
-    designs_predict_physical = None
-    if scaler != None:
-        predicted_geo_numpy = scaler.inverse_transform(predicted_geo_numpy)
-        designs_predict_physical = predicted_geo_numpy
-        sep = np.expand_dims(designs_predict_physical[:,3] - np.maximum(designs_predict_physical[:,1], designs_predict_physical[:,2]), axis=1)
-        designs_predict_physical = np.hstack((np.expand_dims(designs_predict_physical[:,0], axis=1), sep, designs_predict_physical[:,[1,2,3]]))
     
-    print(predicted_geo_numpy, "- scaled" if scaler else "")    
     print(metrics, predicted_geo_numpy)
 
     y_pred = reconstructed_numpy
@@ -50,10 +37,12 @@ def reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spec
     y_true_np = y_true.detach().numpy().flatten()
     y_pred_np = y_pred.detach().numpy().flatten()
 
+    predicted_geo_numpy = scaler.inverse_transform(predicted_geo_numpy)
 
     fig, ax = plt.subplots(1,1, figsize=(12, 6))
     ax.plot(wavelengths, y_true_np, label = f"Target", linestyle='--', color='red')
-    pred_geo_str = get_geo_str(predicted_geo_numpy)
+    # pred_geo_str = get_geo_str(predicted_geo_numpy)
+    pred_geo_str = " ".join([f"{i:.3f}" for i in predicted_geo_numpy[0]])
     ax.plot(wavelengths, y_pred_np, label = f"Predicted {pred_geo_str}")
     
     ax.legend(title="Params. $h_{pill}$, $sep$, $d_{pill}$, $w_{pill}$ all $\mu m$")
@@ -75,16 +64,17 @@ def test_tandem_model(test_type: str, use_mse=False):
     training_config = TrainingConfig("mlp", "params.env")
     # training_config.print()
 
+    tests_folder = ""
 
     if test_type == "t":
         print("Testing augmented test samples")
         test_aug = True
-        tests_folder = "tandem_tests/v3_ls_04_4layers/test_peaks/"
+        # tests_folder = "tandem_tests/v3_ls_04_4layers/test_peaks/"
         title_str = "Prediction of test dataset sample"
     elif test_type == "g":
         print("Testing generated samples")
         test_aug = False
-        tests_folder = "tandem_tests/v3_ls_04_4layers/generated_peaks/"
+        # tests_folder = "tandem_tests/v3_ls_04_4layers/generated_peaks/"
         title_str = "Prediction of generated sample"
     else:
         raise ValueError("test_type must be t or g")
@@ -95,13 +85,13 @@ def test_tandem_model(test_type: str, use_mse=False):
         forward_model_path = "__models/official/version_mse/mlp_mse_20.pth"
         tandem_model_path = "__models/official/version_mse/tandem_cnn_mse_20.pth"
         title_str = title_str + " (MSE Loss)"
-        tests_folder = os.path.join(tests_folder, "mse/")
+        # tests_folder = os.path.join(tests_folder, "mse/")
     else:
         print("using PIL loss")
         forward_model_path = "__models/official/version001/mlp_v3_ls_04_4layers_80.pth"
         tandem_model_path = "__models/official/version001/tandem_cnn_v3_ls_04_4layers_50.pth"
         title_str = title_str + " (Physics-Informed Loss)"
-        tests_folder = os.path.join(tests_folder, "pil/")
+        # tests_folder = os.path.join(tests_folder, "pil/")
 
     print(title_str)
     print(tests_folder)
@@ -155,7 +145,7 @@ def test_tandem_model(test_type: str, use_mse=False):
     tandem_model.eval()
     
 
-    os.makedirs(tests_folder, exist_ok=True)
+    # os.makedirs(tests_folder, exist_ok=True)
     if test_aug:
         # instead of generating spectrum, use an augmented test sample
         rng = np.random.default_rng()
@@ -164,7 +154,7 @@ def test_tandem_model(test_type: str, use_mse=False):
         bounds = compute_peak_bounds(test_spectrum.numpy().squeeze(), 3)
         aug_signal = apply_smooth_flattening(test_spectrum.numpy().squeeze(), bounds)
         out_file = os.path.join(tests_folder, "res_augmented_sample.png")
-        reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, aug_signal, title_str=title_str, output_path = out_file)
+        reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, aug_signal, scaler=scaler_geo_tandem, title_str=title_str, output_path = out_file)
 
     else:
         # generate a spectrum
@@ -179,7 +169,7 @@ def test_tandem_model(test_type: str, use_mse=False):
 
         # i don't know the 'true' geometries because the spectrum is arbitrarily generated
         # geometries are already rescaled
-        predicted_geo_numpy, y_pred, y_true, _ = reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spectrum_test, title_str=title_str, scaler=scaler_geo_tandem, output_path = os.path.join(tests_folder, f"res_generated.png"))
+        predicted_geo_numpy, y_pred, y_true, _ = reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spectrum_test, scaler=scaler_geo_tandem, title_str=title_str, output_path = os.path.join(tests_folder, f"res_generated.png"))
 
         print("test geometries")
         designs_predict_physical = predicted_geo_numpy
@@ -189,13 +179,13 @@ def test_tandem_model(test_type: str, use_mse=False):
         # print(designs_predict_physical)
         # print()
 
-        np.savetxt(os.path.join(tests_folder, 'geo_params.csv'), designs_predict_physical[:, :4][0][np.newaxis, :], delimiter=',', header='h_pill, sep, d_pill, w_pill', comments='') # used for re simulation
+        # np.savetxt(os.path.join(tests_folder, 'geo_params.csv'), designs_predict_physical[:, :4][0][np.newaxis, :], delimiter=',', header='h_pill, sep, d_pill, w_pill', comments='') # used for re simulation
 
-        print("saving related reonstructed spectra")
-        np.savetxt(os.path.join(tests_folder, 'pred_spectra.csv'), y_pred[:, :81][0][np.newaxis, :], delimiter=',')
+        # print("saving related reonstructed spectra")
+        # np.savetxt(os.path.join(tests_folder, 'pred_spectra.csv'), y_pred[:, :81][0][np.newaxis, :], delimiter=',')
 
-        print("saving test spectra and geometries samples")
-        np.savetxt(os.path.join(tests_folder, 'test_spectra.csv'), y_true[:, :81][0][np.newaxis, :], delimiter=',')
+        # print("saving test spectra and geometries samples")
+        # np.savetxt(os.path.join(tests_folder, 'test_spectra.csv'), y_true[:, :81][0][np.newaxis, :], delimiter=',')
 
     print("Done")
 

@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from utils.helper import plot_comsol, read_comsol_csv
-from utils.dataloader import load_reflection_spectra_data
+# from utils.dataloader import load_reflection_spectra_data
 
 
 def get_spectra_from_comsol_file(file_path, columns, n_spectra=9):
@@ -29,14 +29,14 @@ test_resimulated = {
     "resimulated_spectra": "__resimulations/2026_02_10__Alessandro_resim.csv",
     "target_spectra": "__models/official/version001/generated/test_spectra_001_v3_04_80.csv",
     "predicted_spectra": "__models/official/version001/generated/pred_spectra_001_v3_04_80_test.csv",
-    "predicted_geometries": "__models/official/version001/generated/geo_params_001_v3_04_80_test.csv"
+    # "predicted_geometries": "__models/official/version001/generated/geo_params_001_v3_04_80_test.csv"
 }
 
 generated_resimulated = {
-    "resimulated_spectra": "__resimulations/2026_02_10__Alessandro_resim.csv",
+    "resimulated_spectra": "__resimulations/2026_02_12__Alessandro_resim_custom_peaks.csv",
     "target_spectra": "__models/official/version001/generated_custompeaks/test_spectra_001_v3_04_80_custompeaks.csv",
     "predicted_spectra": "__models/official/version001/generated_custompeaks/pred_spectra_001_v3_04_80_custompeaks.csv",
-    "predicted_geometries": "__models/official/version001/generated_custompeaks/geo_params_001_v3_04_80_custompeaks.csv"
+    # "predicted_geometries": "__models/official/version001/generated_custompeaks/geo_params_001_v3_04_80_custompeaks.csv"
 }
 
 
@@ -52,11 +52,7 @@ def plot_resimulated_spectrum(source: str, spectrum_index: int, out_file = "resi
     else:
         raise ValueError("source must be g,t")
     
-    _, _, _, _, wavelength, scaler_geo = load_reflection_spectra_data("__data/pisa_data_2025_12_02.h5")
-
-    def get_geo_str(geo):
-        geo_transformed = scaler_geo.inverse_transform(geo.reshape(1, -1))[0]
-        return " ".join([f"{i:.3f}" for i in geo_transformed])
+    # _, _, _, _, wavelength, scaler_geo = load_reflection_spectra_data("__data/pisa_data_2025_12_02.h5")
 
     columns = ['h_pill (um)', 'sep (um)', 'd_pill (um)', 'w_pill (um)', 'freq (THz)', 'Reflectance (1)']
     resimulated_spectra = get_spectra_from_comsol_file(params["resimulated_spectra"], columns, n_spectra=9)
@@ -70,25 +66,27 @@ def plot_resimulated_spectrum(source: str, spectrum_index: int, out_file = "resi
 
     # get predicted geometries
     #   this is the file sent for the resimulation, so it has the header
-    df_geo_pred = pd.read_csv(params["predicted_geometries"])
+    # df_geo_pred = pd.read_csv(params["predicted_geometries"])
 
     fig, ax = plt.subplots(1, 1, figsize=(12, 6), sharey=True)
     
     target_np = df_target.to_numpy() # target spectra
     pred_np = df_pred.to_numpy() # predicted spectra
-    geo_pred_np = df_geo_pred.to_numpy() # predicted geometries
+    # geo_pred_np = df_geo_pred.to_numpy() # predicted geometries
+
+    # resim spectrum
+    df_spectrum = pd.DataFrame(resimulated_spectra[spectrum_index], columns=columns)
+    wavelength = df_spectrum.get(df_spectrum.columns[4])
 
     target = target_np[spectrum_index]
     pred = pred_np[spectrum_index]
-    pred_geo = geo_pred_np[spectrum_index]
+    # pred_geo = geo_pred_np[spectrum_index]
 
     ax.plot(wavelength, target, label = f"Target", linestyle='--', color='red')
 
-    pred_geo_str = get_geo_str(pred_geo)
-    ax.plot(wavelength, pred, label = f"Predicted {pred_geo_str}", linestyle='--', color='green')
+    ax.plot(wavelength, pred, label = f"Predicted", linestyle='--', color='green')
 
     # plot resimulated spectrum
-    df_spectrum = pd.DataFrame(resimulated_spectra[spectrum_index], columns=columns)
     plot_comsol(
         df_spectrum,
         ax,
