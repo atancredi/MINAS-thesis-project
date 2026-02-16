@@ -7,7 +7,6 @@ from mlp_pytorch import ForwardMLP
 from cnn_pytorch_inverse import InverseCNN
 from loss import ResonancePeaksLoss
 from tandem_model import TandemModel
-from test_model import test_tandem_model
 
 from utils.generate_spectra import generate_spectrum
 from utils.dataloader import apply_smooth_flattening, compute_peak_bounds, load_reflection_spectra_dataloaders
@@ -50,6 +49,7 @@ def reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spec
     fig.suptitle(title_str, fontsize=16)
     ax.set_xlabel("Frequency (THz)")
     ax.set_ylabel("Reflectance")
+    ax.set_ylim([0,1])
 
     plt.tight_layout()
     plt.savefig(output_path) 
@@ -58,7 +58,7 @@ def reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spec
     return predicted_geo_numpy, y_pred, y_true, total.item()
 
 
-def test_tandem_model(test_type: str, use_mse=False):
+def test_tandem_model(test_type: str, use_mse=False, output_path: str = None, spectrum_test = None):
 
 
     training_config = TrainingConfig("mlp", "params.env")
@@ -75,6 +75,10 @@ def test_tandem_model(test_type: str, use_mse=False):
         print("Testing generated samples")
         test_aug = False
         # tests_folder = "tandem_tests/v3_ls_04_4layers/generated_peaks/"
+        title_str = "Prediction of generated sample"
+    elif test_type == "m":
+        test_aug = False
+        print("multi test setting")
         title_str = "Prediction of generated sample"
     else:
         raise ValueError("test_type must be t or g")
@@ -153,23 +157,37 @@ def test_tandem_model(test_type: str, use_mse=False):
         test_spectrum = torch.from_numpy(y_test[test_i]).float().view(y_test[test_i].shape[0], -1)
         bounds = compute_peak_bounds(test_spectrum.numpy().squeeze(), 3)
         aug_signal = apply_smooth_flattening(test_spectrum.numpy().squeeze(), bounds)
-        out_file = os.path.join(tests_folder, "res_augmented_sample.png")
+        if output_path == None:
+            output_path = "res_augmented_sample.png"
+        out_file = os.path.join(tests_folder, output_path)
         reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, aug_signal, scaler=scaler_geo_tandem, title_str=title_str, output_path = out_file)
 
     else:
         # generate a spectrum
-        spectrum_test, _ = generate_spectrum(
-            num_points=81,
-            num_peaks=1,
-            peak_type='lorentzian',
-            # peak_type='gaussian',
-            noise_level=0.001,
-            peak_spread=0.15
-        )
+        if test_type == "g":
+            spectrum_test, _ = generate_spectrum(
+                num_points=81,
+                num_peaks=1,
+                peak_type='lorentzian',
+                # peak_type='gaussian',
+                noise_level=0.001,
+                peak_spread=0.15
+            )
 
         # i don't know the 'true' geometries because the spectrum is arbitrarily generated
         # geometries are already rescaled
-        predicted_geo_numpy, y_pred, y_true, _ = reconstruct_evaluate_spectrum(tandem_model, loss_function, wavelengths, spectrum_test, scaler=scaler_geo_tandem, title_str=title_str, output_path = os.path.join(tests_folder, f"res_generated.png"))
+        if output_path == None:
+            output_path = "res_generated.png"
+        predicted_geo_numpy, y_pred, y_true, _ = reconstruct_evaluate_spectrum(
+            tandem_model,
+            loss_function,
+            wavelengths,
+            spectrum_test,
+            scaler=scaler_geo_tandem,
+            title_str=title_str,
+            # output_path = os.path.join(tests_folder, "res_generated.png"))
+            output_path=output_path
+        )
 
         print("test geometries")
         designs_predict_physical = predicted_geo_numpy
@@ -189,7 +207,20 @@ def test_tandem_model(test_type: str, use_mse=False):
 
     print("Done")
 
+def multi_test():
+    spectrum_test, _ = generate_spectrum(
+        num_points=81,
+        num_peaks=1,
+        peak_type='lorentzian',
+        # peak_type='gaussian',
+        noise_level=0.001,
+        peak_spread=0.15
+    )
+    test_tandem_model("m",False, "res_generated_pil.png", spectrum_test=spectrum_test)
+    test_tandem_model("m",True, "res_generated_mse.png", spectrum_test=spectrum_test)
+
 if __name__ == '__main__':
 
     from fire import Fire
-    Fire(test_tandem_model)
+    # Fire(test_tandem_model)
+    Fire(multi_test)

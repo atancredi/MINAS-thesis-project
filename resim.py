@@ -97,6 +97,7 @@ def plot_resimulated_spectrum(source: str, spectrum_index: int, out_file = "resi
 
     ax.set_xlabel("Frequency (THz)")
     ax.set_ylabel("Reflectance")
+    ax.set_ylim([0,1])
 
     fig.suptitle(f"Re-simulation of {type_str} design", fontsize=16)
 
